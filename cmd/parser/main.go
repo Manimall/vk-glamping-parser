@@ -28,8 +28,7 @@ const (
 	cacheTTL = 5 * time.Minute
 )
 
-// GlampingData — контракт ответа для фронтенда. Поля экспортируемые (с Большой
-// буквы), теги задают lowercase-ключи JSON.
+// GlampingData — контракт ответа для фронтенда.
 type GlampingData struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
@@ -37,21 +36,36 @@ type GlampingData struct {
 	Photos      []string `json:"photos"`
 }
 
+// server держит ОБЩИЕ зависимости приложения. Хендлеры — это методы server,
+// поэтому они берут зависимости из ресивера (s.client, s.store), а не из
+// длинного списка аргументов. Новая зависимость = новое поле здесь, без правки
+// сигнатур хендлеров.
+type server struct {
+	client *vk.Client
+	store  *cache.Cache[GlampingData]
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("startup: %v", err)
 	}
-	client := vk.NewClient(cfg.VKToken)
-	store := cache.New[GlampingData](cacheTTL)
 
-	// Роутер. Go 1.22+ умеет метод+путь прямо в паттерне ("GET /api/...").
+	// Composition root: единственное место, где собираем граф зависимостей.
+	srv := &server{
+		client: vk.NewClient(cfg.VKToken),
+		store:  cache.New[GlampingData](cacheTTL),
+	}
+
+	// Роутер. srv.handleGlamping — это «method value»: метод, привязанный к srv,
+	// который сам по себе реализует http.HandlerFunc. Фабрика-замыкание больше
+	// не нужна — зависимости уже внутри srv.
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/glamping", handleGlamping(client, store))
+	mux.HandleFunc("GET /api/glamping", srv.handleGlamping)
 
-	// СВОЙ http.Server с таймаутами. НЕ используем http.ListenAndServe(...)
-	// без настроек: у него нет таймаутов → уязвимость к «медленным» клиентам.
-	srv := &http.Server{
+	// Транспорт (http.Server) — отдельная сущность от нашего server. Свой сервер
+	// с таймаутами (НЕ http.ListenAndServe без настроек — он без таймаутов).
+	httpServer := &http.Server{
 		Addr:         serverAddr,
 		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
@@ -60,98 +74,72 @@ func main() {
 	}
 
 	// ctx отменяется при SIGINT (Ctrl+C) или SIGTERM (docker stop / systemd).
-	// signal.NotifyContext — идиома Go 1.16+: сигнал → отмена контекста.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Сервер слушает в отдельной горутине, чтобы main мог параллельно ждать
-	// сигнал. ListenAndServe блокирует, поэтому его нельзя звать в main напрямую.
+	// Слушаем в отдельной горутине, чтобы main мог ждать сигнал.
 	go func() {
 		log.Printf("VK parser слушает на %s", serverAddr)
-		// При штатной остановке Shutdown заставляет ListenAndServe вернуть
-		// ErrServerClosed — это НЕ ошибка, поэтому отсеиваем её.
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server: %v", err)
 		}
 	}()
 
-	// Блокируемся до сигнала.
 	<-ctx.Done()
 	log.Println("получен сигнал остановки, завершаем…")
 
-	// Даём до 10 секунд на доработку текущих запросов, потом обрываем.
+	// Даём до 10с на доработку текущих запросов, потом обрываем.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("graceful shutdown: %v", err)
 	}
 	log.Println("сервер остановлен корректно")
 }
 
-// handleGlamping — фабрика хендлера: принимает зависимость (*vk.Client) и
-// возвращает http.HandlerFunc-замыкание. Это идиоматичный для Go способ
-// «прокинуть» зависимость в обработчик (вместо глобальной переменной).
-func handleGlamping(client *vk.Client, store *cache.Cache[GlampingData]) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		domain := r.URL.Query().Get("domain")
-		if domain == "" {
-			// Ошибка клиента → 400 Bad Request.
-			http.Error(w, "query param 'domain' is required", http.StatusBadRequest)
-			return
-		}
+// handleGlamping — теперь МЕТОД server. Сигнатура — ровно http.HandlerFunc
+// (w, r), без зависимостей в аргументах: они доступны через ресивер s.
+func (s *server) handleGlamping(w http.ResponseWriter, r *http.Request) {
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		http.Error(w, "query param 'domain' is required", http.StatusBadRequest)
+		return
+	}
 
-		// Cache hit — отдаём из памяти, в VK не ходим.
-		if data, ok := store.Get(domain); ok {
-			w.Header().Set("X-Cache", "HIT")
-			writeJSON(w, data)
-			return
-		}
-
-		// Cache miss → идём в VK. r.Context() отменяется, когда клиент закрыл
-		// соединение → отмена долетит до VK-запросов внутри buildGlampingData.
-		data, err := buildGlampingData(r.Context(), client, domain)
-		if err != nil {
-			// Сбой на нашей стороне / на стороне VK → 502 Bad Gateway.
-			// Наружу не светим детали ошибки, в лог — пишем полностью.
-			log.Printf("build data for %q: %v", domain, err)
-			http.Error(w, "failed to fetch data from VK", http.StatusBadGateway)
-			return
-		}
-
-		store.Set(domain, data)
-		w.Header().Set("X-Cache", "MISS")
+	// Cache hit — отдаём из памяти, в VK не ходим.
+	if data, ok := s.store.Get(domain); ok {
+		w.Header().Set("X-Cache", "HIT")
 		writeJSON(w, data)
+		return
 	}
+
+	// Cache miss → идём в VK. r.Context() отменяется, если клиент отвалился.
+	data, err := s.buildGlampingData(r.Context(), domain)
+	if err != nil {
+		log.Printf("build data for %q: %v", domain, err)
+		http.Error(w, "failed to fetch data from VK", http.StatusBadGateway)
+		return
+	}
+
+	s.store.Set(domain, data)
+	w.Header().Set("X-Cache", "MISS")
+	writeJSON(w, data)
 }
 
-// writeJSON — единая запись JSON-ответа. Вынесена, чтобы не дублировать
-// кодирование для веток HIT и MISS (DRY). Кодируем потоково прямо в
-// ResponseWriter (он реализует io.Writer).
-func writeJSON(w http.ResponseWriter, v any) {
-	// Content-Type ставим ДО тела (после первого Write заголовки уже ушли).
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		log.Printf("encode response: %v", err)
-	}
-}
-
-// buildGlampingData — вся «бизнес-логика» одного запроса: резолвим домен,
-// тянем фото и товар, собираем контракт. Отделена от HTTP, чтобы её можно было
-// переиспользовать (например, в тесте) и не мешать транспорт с логикой.
-func buildGlampingData(ctx context.Context, client *vk.Client, domain string) (GlampingData, error) {
-	ownerID, err := client.ResolveOwnerID(ctx, domain)
+// buildGlampingData — тоже метод server: «бизнес-логика» одного запроса.
+// Берёт VK-клиент из ресивера (s.client), HTTP не знает.
+func (s *server) buildGlampingData(ctx context.Context, domain string) (GlampingData, error) {
+	ownerID, err := s.client.ResolveOwnerID(ctx, domain)
 	if err != nil {
 		return GlampingData{}, fmt.Errorf("resolve: %w", err)
 	}
 
-	photos, err := client.GetPhotos(ctx, ownerID)
+	photos, err := s.client.GetPhotos(ctx, ownerID)
 	if err != nil {
 		return GlampingData{}, fmt.Errorf("photos: %w", err)
 	}
 
-	item, err := client.GetMarketItemByID(ctx, productID)
+	item, err := s.client.GetMarketItemByID(ctx, productID)
 	if err != nil {
 		return GlampingData{}, fmt.Errorf("market item: %w", err)
 	}
@@ -162,4 +150,15 @@ func buildGlampingData(ctx context.Context, client *vk.Client, domain string) (G
 		Price:       item.Price.Text,
 		Photos:      photos,
 	}, nil
+}
+
+// writeJSON — без зависимостей, поэтому остаётся обычной функцией (не методом).
+// DRY: одна запись JSON-ответа для веток HIT и MISS.
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		log.Printf("encode response: %v", err)
+	}
 }

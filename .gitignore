@@ -1,0 +1,38 @@
+# --- Секреты / окружение ---
+.env
+.env.local
+.env.*.local
+
+# --- Скомпилированные бинарники ---
+# Бинарь модуля (go build без -o кладёт его сюда)
+/vk-parser
+# Бинарь точки входа (go build ./cmd/parser)
+/parser
+cmd/parser/parser
+# Windows / прочие платформы
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# --- Тесты и покрытие ---
+*.test
+*.out
+coverage.*
+
+# --- Сгенерированные артефакты парсера (не исходники) ---
+/elkidom_data.json
+/*_data.json
+
+# --- Go workspace ---
+go.work
+go.work.sum
+
+# --- Зависимости (если используется vendoring) ---
+/vendor/
+
+# --- IDE / ОС ---
+.DS_Store
+.idea/
+.vscode/

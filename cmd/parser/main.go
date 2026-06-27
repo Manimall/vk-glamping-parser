@@ -5,9 +5,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"vk-parser/internal/config"
@@ -51,11 +55,33 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Printf("VK parser слушает на %s", serverAddr)
-	// ListenAndServe блокирует и возвращает ошибку только при падении.
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("server: %v", err)
+	// ctx отменяется при SIGINT (Ctrl+C) или SIGTERM (docker stop / systemd).
+	// signal.NotifyContext — идиома Go 1.16+: сигнал → отмена контекста.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Сервер слушает в отдельной горутине, чтобы main мог параллельно ждать
+	// сигнал. ListenAndServe блокирует, поэтому его нельзя звать в main напрямую.
+	go func() {
+		log.Printf("VK parser слушает на %s", serverAddr)
+		// При штатной остановке Shutdown заставляет ListenAndServe вернуть
+		// ErrServerClosed — это НЕ ошибка, поэтому отсеиваем её.
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server: %v", err)
+		}
+	}()
+
+	// Блокируемся до сигнала.
+	<-ctx.Done()
+	log.Println("получен сигнал остановки, завершаем…")
+
+	// Даём до 10 секунд на доработку текущих запросов, потом обрываем.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("graceful shutdown: %v", err)
 	}
+	log.Println("сервер остановлен корректно")
 }
 
 // handleGlamping — фабрика хендлера: принимает зависимость (*vk.Client) и

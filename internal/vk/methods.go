@@ -1,6 +1,7 @@
 package vk
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -12,12 +13,12 @@ import (
 // VK кодирует тип владельца ЗНАКОМ owner_id:
 //   - группа (community)  → owner_id ОТРИЦАТЕЛЬНЫЙ  (-object_id)
 //   - пользователь (user) → owner_id ПОЛОЖИТЕЛЬНЫЙ (+object_id)
-func (c *Client) ResolveOwnerID(domain string) (int64, error) {
+func (c *Client) ResolveOwnerID(ctx context.Context, domain string) (int64, error) {
 	params := url.Values{}
 	params.Set("screen_name", domain)
 
 	var resolved resolvedScreenName
-	if err := c.call("utils.resolveScreenName", params, &resolved); err != nil {
+	if err := c.call(ctx, "utils.resolveScreenName", params, &resolved); err != nil {
 		return 0, fmt.Errorf("resolve %q: %w", domain, err)
 	}
 
@@ -34,14 +35,14 @@ func (c *Client) ResolveOwnerID(domain string) (int64, error) {
 
 // GetPhotos возвращает URL фотографий со стены — по одному (самому крупному)
 // URL на каждое фото.
-func (c *Client) GetPhotos(ownerID int64) ([]string, error) {
+func (c *Client) GetPhotos(ctx context.Context, ownerID int64) ([]string, error) {
 	params := url.Values{}
 	params.Set("owner_id", strconv.FormatInt(ownerID, 10))
 	params.Set("album_id", "wall")
 	params.Set("count", defaultCount)
 
 	var data photosGetResponse
-	if err := c.call("photos.get", params, &data); err != nil {
+	if err := c.call(ctx, "photos.get", params, &data); err != nil {
 		return nil, fmt.Errorf("get photos for owner %d: %w", ownerID, err)
 	}
 
@@ -70,13 +71,13 @@ func bestPhotoURL(sizes []photoSize) string {
 }
 
 // GetMarketItems возвращает товары из раздела «Товары» владельца.
-func (c *Client) GetMarketItems(ownerID int64) ([]MarketItem, error) {
+func (c *Client) GetMarketItems(ctx context.Context, ownerID int64) ([]MarketItem, error) {
 	params := url.Values{}
 	params.Set("owner_id", strconv.FormatInt(ownerID, 10))
 	params.Set("count", defaultCount)
 
 	var data marketGetResponse
-	if err := c.call("market.get", params, &data); err != nil {
+	if err := c.call(ctx, "market.get", params, &data); err != nil {
 		return nil, fmt.Errorf("get market items for owner %d: %w", ownerID, err)
 	}
 	return data.Items, nil
@@ -85,13 +86,13 @@ func (c *Client) GetMarketItems(ownerID int64) ([]MarketItem, error) {
 // GetMarketItemByID тянет ОДИН товар по абсолютному id вида "<owner_id>_<item_id>"
 // (например "-211011668_6377368"). Работает даже когда каталог скрыт настройками
 // приватности и market.get отдаёт пусто.
-func (c *Client) GetMarketItemByID(itemID string) (*MarketItem, error) {
+func (c *Client) GetMarketItemByID(ctx context.Context, itemID string) (*MarketItem, error) {
 	params := url.Values{}
 	params.Set("item_ids", itemID)
 	params.Set("extended", "1")
 
 	var data marketGetResponse
-	if err := c.call("market.getById", params, &data); err != nil {
+	if err := c.call(ctx, "market.getById", params, &data); err != nil {
 		return nil, fmt.Errorf("get market item %q: %w", itemID, err)
 	}
 

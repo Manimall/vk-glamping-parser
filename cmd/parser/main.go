@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -69,7 +70,9 @@ func handleGlamping(client *vk.Client) http.HandlerFunc {
 			return
 		}
 
-		data, err := buildGlampingData(client, domain)
+		// r.Context() отменяется, когда клиент закрыл соединение → отмена
+		// долетит до VK-запросов внутри buildGlampingData.
+		data, err := buildGlampingData(r.Context(), client, domain)
 		if err != nil {
 			// Сбой на нашей стороне / на стороне VK → 502 Bad Gateway.
 			// Наружу не светим детали ошибки, в лог — пишем полностью.
@@ -96,18 +99,18 @@ func handleGlamping(client *vk.Client) http.HandlerFunc {
 // buildGlampingData — вся «бизнес-логика» одного запроса: резолвим домен,
 // тянем фото и товар, собираем контракт. Отделена от HTTP, чтобы её можно было
 // переиспользовать (например, в тесте) и не мешать транспорт с логикой.
-func buildGlampingData(client *vk.Client, domain string) (GlampingData, error) {
-	ownerID, err := client.ResolveOwnerID(domain)
+func buildGlampingData(ctx context.Context, client *vk.Client, domain string) (GlampingData, error) {
+	ownerID, err := client.ResolveOwnerID(ctx, domain)
 	if err != nil {
 		return GlampingData{}, fmt.Errorf("resolve: %w", err)
 	}
 
-	photos, err := client.GetPhotos(ownerID)
+	photos, err := client.GetPhotos(ctx, ownerID)
 	if err != nil {
 		return GlampingData{}, fmt.Errorf("photos: %w", err)
 	}
 
-	item, err := client.GetMarketItemByID(productID)
+	item, err := client.GetMarketItemByID(ctx, productID)
 	if err != nil {
 		return GlampingData{}, fmt.Errorf("market item: %w", err)
 	}

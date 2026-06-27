@@ -2,6 +2,7 @@
 package vk
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -50,15 +51,23 @@ type apiEnvelope struct {
 
 // call — единственное место, где реально ходит HTTP. Все публичные методы
 // строят параметры и делегируют сюда. dst — куда домаршалить "response".
-func (c *Client) call(method string, params url.Values, dst any) error {
+// ctx даёт возможность отменить запрос (таймаут / клиент отвалился).
+func (c *Client) call(ctx context.Context, method string, params url.Values, dst any) error {
 	params.Set("access_token", c.token)
 	params.Set("v", apiVersion)
 
 	endpoint := fmt.Sprintf("%s/%s?%s", apiBaseURL, method, params.Encode())
 
-	resp, err := c.httpClient.Get(endpoint)
+	// NewRequestWithContext привязывает ctx к запросу: при ctx.Done() HTTP-вызов
+	// прервётся сам. httpClient.Get(...) так не умеет — он без контекста.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return fmt.Errorf("vk: GET %s: %w", method, err)
+		return fmt.Errorf("vk: build request %s: %w", method, err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("vk: do %s: %w", method, err)
 	}
 	// Закрыть тело ОБЯЗАТЕЛЬНО — иначе соединение не вернётся в пул и утечёт.
 	defer resp.Body.Close()

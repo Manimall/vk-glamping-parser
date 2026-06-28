@@ -21,18 +21,18 @@ import (
 
 const (
 	serverAddr = ":8080"
-	// productID — пока конкретный товар ЁлкиДом. В «боевом» сервисе id товара
-	// резолвился бы по домену (отдельная задача), здесь фиксируем для демо.
-	productID = "-211011668_6377368"
 	// cacheTTL — сколько держим карточку в кэше, прежде чем перепарсить VK.
 	cacheTTL = 5 * time.Minute
 )
 
 // GlampingData — контракт ответа для фронтенда.
+// omitempty: если товара у объекта нет (скрытый/пустой каталог), эти поля не
+// попадут в JSON вовсе — фронт увидит только photos и отрисует карточку без
+// заголовка/цены, а не с пустыми строками.
 type GlampingData struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Price       string   `json:"price"`
+	Title       string   `json:"title,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Price       string   `json:"price,omitempty"`
 	Photos      []string `json:"photos"`
 }
 
@@ -139,17 +139,25 @@ func (s *server) buildGlampingData(ctx context.Context, domain string) (Glamping
 		return GlampingData{}, fmt.Errorf("photos: %w", err)
 	}
 
-	item, err := s.client.GetMarketItemByID(ctx, productID)
+	data := GlampingData{Photos: photos}
+
+	// Товары резолвим ДИНАМИЧЕСКИ по владельцу — без захардкоженного id.
+	items, err := s.client.GetMarketItems(ctx, ownerID)
 	if err != nil {
-		return GlampingData{}, fmt.Errorf("market item: %w", err)
+		return GlampingData{}, fmt.Errorf("market: %w", err)
 	}
 
-	return GlampingData{
-		Title:       item.Title,
-		Description: item.Description,
-		Price:       item.Price.Text,
-		Photos:      photos,
-	}, nil
+	// «Данных может не быть»: каталог скрыт настройками приватности или пуст.
+	// Тогда отдаём карточку только с фото (фоллбэк), а не падаем. Берём первый
+	// товар как основной для карточки.
+	if len(items) > 0 {
+		item := items[0]
+		data.Title = item.Title
+		data.Description = item.Description
+		data.Price = item.Price.Text
+	}
+
+	return data, nil
 }
 
 // writeJSON — без зависимостей, поэтому остаётся обычной функцией (не методом).

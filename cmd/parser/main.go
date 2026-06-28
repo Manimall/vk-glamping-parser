@@ -20,6 +20,7 @@ import (
 	"vk-parser/internal/cache"
 	"vk-parser/internal/config"
 	"vk-parser/internal/extract"
+	"vk-parser/internal/objects"
 	"vk-parser/internal/vk"
 )
 
@@ -27,6 +28,8 @@ const (
 	serverAddr = ":8080"
 	// cacheTTL — сколько держим карточку в кэше, прежде чем перепарсить VK.
 	cacheTTL = 5 * time.Minute
+	// dataDir — каталог с пер-объектными конфигами data/<domain>.json.
+	dataDir = "data"
 )
 
 // Coords — гео-координаты объекта. Указатель в GlampingData (см. ниже), чтобы
@@ -219,20 +222,58 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 		}
 	}
 
-	// Координаты/карту VK часто не отдаёт — тогда берём их из параметров запроса
-	// (оператор передаёт вручную). Явно переданные координаты имеют приоритет.
-	if c, ok := parseCoords(q.coords); ok {
+	// Пер-объектный конфиг data/<domain>.json — ручные данные, которых нет в VK
+	// (координаты, карта, id товаров, «ручные» домики с Avito). Нет файла — nil.
+	cfg, err := objects.Load(dataDir, q.domain)
+	if err != nil {
+		log.Printf("object config %q: %v (пропускаю)", q.domain, err)
+	}
+
+	// Слияние источников. Приоритет — у параметров запроса; чего нет в запросе,
+	// берём из конфига. Так конфиг = «значения по умолчанию для объекта».
+	coordsRaw, mapURL, itemsRaw := q.coords, q.mapURL, q.items
+	var manual []objects.Cabin
+	if cfg != nil {
+		if coordsRaw == "" {
+			coordsRaw = cfg.Coords
+		}
+		if mapURL == "" {
+			mapURL = cfg.Map
+		}
+		if itemsRaw == "" && len(cfg.Items) > 0 {
+			itemsRaw = strings.Join(cfg.Items, ",")
+		}
+		// Адрес из конфига точнее города из VK — если задан, используем его.
+		if cfg.Address != "" {
+			data.Location = cfg.Address
+		}
+		manual = cfg.Cabins
+	}
+
+	if c, ok := parseCoords(coordsRaw); ok {
 		data.Coords = c
 	}
-	data.MapURL = q.mapURL
+	data.MapURL = mapURL
 
-	// Домики: тянем переданные товары по прямым id (каталог через API не
-	// перечисляется). Без items — отдаём объект без домиков (не падаем).
-	ids := marketIDsFromParam(q.items, ownerID)
-	if len(ids) > 0 {
-		data.Cabins = s.buildCabins(ctx, ids, data.Location, len(photos))
+	// «Сырые» домики из двух источников: товары VK (по прямым id) и ручные
+	// домики из конфига (например, описание с Avito, который ботами не парсится).
+	raw := make([]objects.Cabin, 0)
+	if ids := marketIDsFromParam(itemsRaw, ownerID); len(ids) > 0 {
+		if items, err := s.client.GetMarketItemsByIDs(ctx, ids); err != nil {
+			log.Printf("market items %v: %v (пропускаю товары)", ids, err)
+		} else {
+			for _, item := range items {
+				raw = append(raw, objects.Cabin{
+					Title:       item.Title,
+					Price:       item.Price.Text,
+					Description: item.Description,
+				})
+			}
+		}
 	}
+	raw = append(raw, manual...)
 
+	data.Cabins = s.structureCabins(ctx, raw, data.Location, len(photos))
 	return data, nil
 }
 
@@ -251,38 +292,27 @@ func parseCoords(raw string) (*Coords, bool) {
 	return &Coords{Lat: lat, Lon: lon}, true
 }
 
-// buildCabins грузит товары-домики и структурирует каждый. В конце — дедуп:
-// почти одинаковые варианты (А-фрейм светлый/тёмный) схлопываются в один.
-func (s *server) buildCabins(ctx context.Context, ids []string, location string, photoCount int) []Cabin {
-	items, err := s.client.GetMarketItemsByIDs(ctx, ids)
-	if err != nil {
-		log.Printf("market items %v: %v (пропускаю домики)", ids, err)
-		return []Cabin{}
-	}
-
-	cabins := make([]Cabin, 0, len(items))
-	for _, item := range items {
-		cabin := Cabin{
-			Title:       item.Title,
-			Price:       item.Price.Text,
-			Description: item.Description,
-		}
+// structureCabins прогоняет каждый «сырой» домик через извлекатель (что в нём
+// есть) и схлопывает почти одинаковые варианты (дедуп).
+func (s *server) structureCabins(ctx context.Context, raw []objects.Cabin, location string, photoCount int) []Cabin {
+	cabins := make([]Cabin, 0, len(raw))
+	for _, rc := range raw {
+		cabin := Cabin{Title: rc.Title, Price: rc.Price, Description: rc.Description}
 		// Структурируем описание домика → что в нём есть (главное для нас).
 		listing := extract.Listing{
-			Title:       item.Title,
-			Description: item.Description,
+			Title:       rc.Title,
+			Description: rc.Description,
 			Location:    location,
-			Price:       item.Price.Text,
+			Price:       rc.Price,
 			PhotoCount:  photoCount,
 		}
 		if prop, err := s.extractor.Extract(ctx, listing); err != nil {
-			log.Printf("extract cabin %q: %v", item.Title, err)
+			log.Printf("extract cabin %q: %v", rc.Title, err)
 		} else {
 			cabin.Property = prop
 		}
 		cabins = append(cabins, cabin)
 	}
-
 	return dedupCabins(cabins)
 }
 

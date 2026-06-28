@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -34,9 +35,10 @@ func (c *Client) ResolveOwnerID(ctx context.Context, domain string) (int64, erro
 	}
 }
 
-// GetPhotos возвращает URL фотографий со стены — по одному (самому крупному)
-// URL на каждое фото.
-func (c *Client) GetPhotos(ctx context.Context, ownerID int64) ([]string, error) {
+// GetPhotos возвращает URL фотографий со стены: выбирает limit ЛУЧШИХ по
+// разрешению (площадь = ширина×высота отсекает мелкие репосты/скриншоты) и
+// отдаёт их в исходном порядке стены. limit<=0 — без ограничения.
+func (c *Client) GetPhotos(ctx context.Context, ownerID int64, limit int) ([]string, error) {
 	params := url.Values{}
 	params.Set("owner_id", strconv.FormatInt(ownerID, 10))
 	params.Set("album_id", "wall")
@@ -47,18 +49,44 @@ func (c *Client) GetPhotos(ctx context.Context, ownerID int64) ([]string, error)
 		return nil, fmt.Errorf("get photos for owner %d: %w", ownerID, err)
 	}
 
-	urls := make([]string, 0, len(data.Items))
-	for _, p := range data.Items {
-		if best := bestPhotoURL(p.Sizes); best != "" {
-			urls = append(urls, best)
-		}
-	}
-	return urls, nil
+	return selectBestPhotos(data.Items, limit), nil
 }
 
-// bestPhotoURL — ручной reduce: ищем размер с максимальной площадью.
+// selectBestPhotos выбирает limit лучших фото по площади и возвращает их URL в
+// ИСХОДНОМ порядке (чтобы галерея читалась естественно, а не от крупного к мелкому).
+func selectBestPhotos(photos []photo, limit int) []string {
+	// scored — фото с его позицией и площадью лучшего размера.
+	type scored struct {
+		idx  int
+		url  string
+		area int
+	}
+
+	ranked := make([]scored, 0, len(photos))
+	for i, p := range photos {
+		if u, area := bestPhotoURL(p.Sizes); u != "" {
+			ranked = append(ranked, scored{idx: i, url: u, area: area})
+		}
+	}
+
+	// Меньше лимита (или лимит выключен) — отдаём все как есть.
+	if limit > 0 && len(ranked) > limit {
+		// По площади убыв. → берём top-limit → возвращаем в исходный порядок.
+		sort.Slice(ranked, func(i, j int) bool { return ranked[i].area > ranked[j].area })
+		ranked = ranked[:limit]
+		sort.Slice(ranked, func(i, j int) bool { return ranked[i].idx < ranked[j].idx })
+	}
+
+	urls := make([]string, len(ranked))
+	for i, s := range ranked {
+		urls[i] = s.url
+	}
+	return urls
+}
+
+// bestPhotoURL — ручной reduce: размер с максимальной площадью + сама площадь.
 // Типы "w" и "z" у VK — самые большие, поэтому max по площади их и выберет.
-func bestPhotoURL(sizes []photoSize) string {
+func bestPhotoURL(sizes []photoSize) (string, int) {
 	best := ""
 	maxArea := -1
 	for _, s := range sizes {
@@ -68,7 +96,7 @@ func bestPhotoURL(sizes []photoSize) string {
 			best = s.URL
 		}
 	}
-	return best
+	return best, maxArea
 }
 
 // GetMarketItems возвращает товары из раздела «Товары» владельца.

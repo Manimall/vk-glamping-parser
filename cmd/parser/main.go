@@ -20,6 +20,7 @@ import (
 	"vk-parser/internal/cache"
 	"vk-parser/internal/config"
 	"vk-parser/internal/extract"
+	"vk-parser/internal/geocode"
 	"vk-parser/internal/objects"
 	"vk-parser/internal/vk"
 )
@@ -30,6 +31,8 @@ const (
 	cacheTTL = 5 * time.Minute
 	// dataDir — каталог с пер-объектными конфигами data/<domain>.json.
 	dataDir = "data"
+	// maxPhotos — сколько лучших фото оставляем в галерее.
+	maxPhotos = 15
 )
 
 // Coords — гео-координаты объекта. Указатель в GlampingData (см. ниже), чтобы
@@ -94,6 +97,8 @@ type server struct {
 	// чем именно извлекают: бесплатной эвристикой или платным LLM. Подменить
 	// движок = передать сюда другой объект, реализующий extract.Extractor.
 	extractor extract.Extractor
+	// geocoder — получает координаты из адреса, когда их не задали вручную.
+	geocoder *geocode.Client
 }
 
 func main() {
@@ -104,8 +109,9 @@ func main() {
 
 	// Composition root: единственное место, где собираем граф зависимостей.
 	srv := &server{
-		client: vk.NewClient(cfg.VKToken),
-		store:  cache.New[GlampingData](cacheTTL),
+		client:   vk.NewClient(cfg.VKToken),
+		store:    cache.New[GlampingData](cacheTTL),
+		geocoder: geocode.New(),
 	}
 
 	// Выбор движка извлечения. Есть ключ — берём умный LLM; нет — бесплатную
@@ -201,7 +207,7 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 		return GlampingData{}, fmt.Errorf("resolve: %w", err)
 	}
 
-	photos, err := s.client.GetPhotos(ctx, ownerID)
+	photos, err := s.client.GetPhotos(ctx, ownerID, maxPhotos)
 	if err != nil {
 		return GlampingData{}, fmt.Errorf("photos: %w", err)
 	}
@@ -254,6 +260,16 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 		data.Coords = c
 	}
 	data.MapURL = mapURL
+
+	// Фоллбэк: координат нет, но есть адрес → получаем их геокодером (бесплатно).
+	// Ручные координаты приоритетнее, поэтому ходим в сеть только при их отсутствии.
+	if data.Coords == nil && data.Location != "" {
+		if c, err := s.geocoder.Geocode(ctx, data.Location); err != nil {
+			log.Printf("geocode %q: %v (без координат)", data.Location, err)
+		} else {
+			data.Coords = &Coords{Lat: c.Lat, Lon: c.Lon}
+		}
+	}
 
 	// «Сырые» домики из двух источников: товары VK (по прямым id) и ручные
 	// домики из конфига (например, описание с Avito, который ботами не парсится).

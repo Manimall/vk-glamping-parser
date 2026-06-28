@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // ResolveOwnerID превращает короткое имя (домен) в owner_id для последующих
@@ -103,6 +104,24 @@ func (c *Client) GetMarketItemByID(ctx context.Context, itemID string) (*MarketI
 	}
 
 	return &data.Items[0], nil
+}
+
+// GetMarketItemsByIDs тянет НЕСКОЛЬКО товаров за ОДИН вызов: item_ids у VK
+// принимает список через запятую. Так мы грузим все домики глэмпинга разом,
+// а не по запросу на каждый (меньше round-trip'ов к VK).
+func (c *Client) GetMarketItemsByIDs(ctx context.Context, itemIDs []string) ([]MarketItem, error) {
+	if len(itemIDs) == 0 {
+		return nil, nil
+	}
+
+	params := url.Values{}
+	params.Set("item_ids", strings.Join(itemIDs, ","))
+
+	var data marketGetResponse
+	if err := c.call(ctx, "market.getById", params, &data); err != nil {
+		return nil, fmt.Errorf("get market items by ids: %w", err)
+	}
+	return data.Items, nil
 }
 
 // GetGroupInfo тянет инфо о сообществе по домену: название, описание, адрес/

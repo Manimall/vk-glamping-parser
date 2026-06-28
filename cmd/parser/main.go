@@ -11,11 +11,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"vk-parser/internal/cache"
 	"vk-parser/internal/config"
+	"vk-parser/internal/extract"
 	"vk-parser/internal/vk"
 )
 
@@ -33,17 +37,47 @@ type Coords struct {
 	Lon float64 `json:"lon"`
 }
 
-// GlampingData — «сырьё», собранное из VK: фото + текст товара + инфо группы.
-// omitempty убирает поля, которых нет (скрытый каталог, не задан адрес и т.п.).
+// Cabin — ОДИН домик глэмпинга (A-frame, BALI и т.п.). У каждого своя цена и
+// своё описание → свои удобства. Property — структурированный результат: что
+// именно есть в этом домике (главное, что нам нужно).
+type Cabin struct {
+	Title       string            `json:"title"`
+	Price       string            `json:"price,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Property    *extract.Property `json:"property,omitempty"`
+	// Variants — заголовки почти-одинаковых домиков, схлопнутых в этот (напр.
+	// «тёмный» вариант того же А-фрейма). omitempty: если дублей не было — поля нет.
+	Variants []string `json:"variants,omitempty"`
+}
+
+// GlampingData — карточка глэмпинга: ОБЪЕКТ-уровень (название, локация, галерея)
+// + список домиков. omitempty убирает поля, которых нет.
 type GlampingData struct {
-	Title       string   `json:"title,omitempty"`       // название товара
-	Description string   `json:"description,omitempty"`  // описание товара (текст)
-	Price       string   `json:"price,omitempty"`        // цена товара
-	About       string   `json:"about,omitempty"`        // описание сообщества
-	Location    string   `json:"location,omitempty"`     // адрес/город
-	Coords      *Coords  `json:"coords,omitempty"`       // координаты (если заданы)
-	Contact     string   `json:"contact,omitempty"`      // телефон
-	Photos      []string `json:"photos"`
+	Title    string   `json:"title,omitempty"`    // название глэмпинга (из группы)
+	About    string   `json:"about,omitempty"`    // описание сообщества
+	Location string   `json:"location,omitempty"` // адрес/город
+	Coords   *Coords  `json:"coords,omitempty"`   // координаты (если заданы)
+	MapURL   string   `json:"mapUrl,omitempty"`   // ссылка на карту (если задана)
+	Contact  string   `json:"contact,omitempty"`  // телефон
+	Photos   []string `json:"photos"`             // общая галерея
+	Cabins   []Cabin  `json:"cabins"`             // домики с удобствами
+}
+
+// glampingQuery — разобранные параметры запроса. Объект-параметр вместо длинного
+// списка аргументов buildGlampingData(domain, items, coords, map, ...): добавить
+// новый параметр = новое поле здесь, сигнатуры функций не пухнут (тот же приём,
+// что и со структурой server).
+type glampingQuery struct {
+	domain string
+	items  string // товары-домики (URL/id через запятую)
+	coords string // "lat,lon" — если VK не отдал координаты
+	mapURL string // ссылка на карту (Яндекс/Google)
+}
+
+// cacheKey — детерминированный ключ кэша из всех параметров: разный ввод = разный
+// ответ. Поля простые строки, порядок фиксирован, так что ключ стабилен.
+func (q glampingQuery) cacheKey() string {
+	return strings.Join([]string{q.domain, q.items, q.coords, q.mapURL}, "|")
 }
 
 // server держит ОБЩИЕ зависимости приложения. Хендлеры — это методы server,
@@ -53,6 +87,10 @@ type GlampingData struct {
 type server struct {
 	client *vk.Client
 	store  *cache.Cache[GlampingData]
+	// extractor — ИНТЕРФЕЙС, а не конкретный тип. server не знает (и не должен),
+	// чем именно извлекают: бесплатной эвристикой или платным LLM. Подменить
+	// движок = передать сюда другой объект, реализующий extract.Extractor.
+	extractor extract.Extractor
 }
 
 func main() {
@@ -65,6 +103,17 @@ func main() {
 	srv := &server{
 		client: vk.NewClient(cfg.VKToken),
 		store:  cache.New[GlampingData](cacheTTL),
+	}
+
+	// Выбор движка извлечения. Есть ключ — берём умный LLM; нет — бесплатную
+	// эвристику. Структура одинаковая, отличается только «начинка» — в этом и
+	// смысл интерфейса: остальной код (хендлер) не меняется ни на строку.
+	if cfg.AnthropicKey != "" {
+		srv.extractor = extract.NewLLM(cfg.AnthropicKey)
+		log.Println("извлечение: LLM (ANTHROPIC_API_KEY задан)")
+	} else {
+		srv.extractor = extract.NewHeuristic()
+		log.Println("извлечение: эвристика (бесплатно, без ключа)")
 	}
 
 	// Роутер. srv.handleGlamping — это «method value»: метод, привязанный к srv,
@@ -110,36 +159,41 @@ func main() {
 // handleGlamping — теперь МЕТОД server. Сигнатура — ровно http.HandlerFunc
 // (w, r), без зависимостей в аргументах: они доступны через ресивер s.
 func (s *server) handleGlamping(w http.ResponseWriter, r *http.Request) {
-	domain := r.URL.Query().Get("domain")
-	if domain == "" {
+	q := glampingQuery{
+		domain: r.URL.Query().Get("domain"),
+		items:  r.URL.Query().Get("items"),
+		coords: r.URL.Query().Get("coords"),
+		mapURL: r.URL.Query().Get("map"),
+	}
+	if q.domain == "" {
 		http.Error(w, "query param 'domain' is required", http.StatusBadRequest)
 		return
 	}
 
 	// Cache hit — отдаём из памяти, в VK не ходим.
-	if data, ok := s.store.Get(domain); ok {
+	if data, ok := s.store.Get(q.cacheKey()); ok {
 		w.Header().Set("X-Cache", "HIT")
 		writeJSON(w, data)
 		return
 	}
 
 	// Cache miss → идём в VK. r.Context() отменяется, если клиент отвалился.
-	data, err := s.buildGlampingData(r.Context(), domain)
+	data, err := s.buildGlampingData(r.Context(), q)
 	if err != nil {
-		log.Printf("build data for %q: %v", domain, err)
+		log.Printf("build data for %q: %v", q.domain, err)
 		http.Error(w, "failed to fetch data from VK", http.StatusBadGateway)
 		return
 	}
 
-	s.store.Set(domain, data)
+	s.store.Set(q.cacheKey(), data)
 	w.Header().Set("X-Cache", "MISS")
 	writeJSON(w, data)
 }
 
-// buildGlampingData — тоже метод server: «бизнес-логика» одного запроса.
-// Берёт VK-клиент из ресивера (s.client), HTTP не знает.
-func (s *server) buildGlampingData(ctx context.Context, domain string) (GlampingData, error) {
-	ownerID, err := s.client.ResolveOwnerID(ctx, domain)
+// buildGlampingData — «бизнес-логика» одного запроса: объект-уровень (инфо
+// группы + галерея) и список домиков из переданных items.
+func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (GlampingData, error) {
+	ownerID, err := s.client.ResolveOwnerID(ctx, q.domain)
 	if err != nil {
 		return GlampingData{}, fmt.Errorf("resolve: %w", err)
 	}
@@ -149,30 +203,14 @@ func (s *server) buildGlampingData(ctx context.Context, domain string) (Glamping
 		return GlampingData{}, fmt.Errorf("photos: %w", err)
 	}
 
-	data := GlampingData{Photos: photos}
+	data := GlampingData{Photos: photos, Cabins: []Cabin{}}
 
-	// Товары резолвим ДИНАМИЧЕСКИ по владельцу — без захардкоженного id.
-	items, err := s.client.GetMarketItems(ctx, ownerID)
-	if err != nil {
-		return GlampingData{}, fmt.Errorf("market: %w", err)
-	}
-
-	// «Данных может не быть»: каталог скрыт настройками приватности или пуст.
-	// Тогда отдаём карточку только с фото (фоллбэк), а не падаем. Берём первый
-	// товар как основной для карточки.
-	if len(items) > 0 {
-		item := items[0]
-		data.Title = item.Title
-		data.Description = item.Description
-		data.Price = item.Price.Text
-	}
-
-	// Инфо сообщества: описание группы + локация + контакт. Метод работает
-	// только для групп; для пользователей VK вернёт ошибку — тогда просто
-	// пропускаем эти поля (graceful degradation), не роняя весь запрос.
-	if info, err := s.client.GetGroupInfo(ctx, domain); err != nil {
-		log.Printf("group info for %q: %v (пропускаю локацию)", domain, err)
+	// Объект-уровень: название/локация/контакт берём из инфо сообщества.
+	// Метод только для групп; для пользователей VK вернёт ошибку — graceful.
+	if info, err := s.client.GetGroupInfo(ctx, q.domain); err != nil {
+		log.Printf("group info for %q: %v (пропускаю инфо объекта)", q.domain, err)
 	} else {
+		data.Title = info.Name
 		data.About = info.Description
 		data.Location = info.Address
 		data.Contact = info.Phone
@@ -181,7 +219,165 @@ func (s *server) buildGlampingData(ctx context.Context, domain string) (Glamping
 		}
 	}
 
+	// Координаты/карту VK часто не отдаёт — тогда берём их из параметров запроса
+	// (оператор передаёт вручную). Явно переданные координаты имеют приоритет.
+	if c, ok := parseCoords(q.coords); ok {
+		data.Coords = c
+	}
+	data.MapURL = q.mapURL
+
+	// Домики: тянем переданные товары по прямым id (каталог через API не
+	// перечисляется). Без items — отдаём объект без домиков (не падаем).
+	ids := marketIDsFromParam(q.items, ownerID)
+	if len(ids) > 0 {
+		data.Cabins = s.buildCabins(ctx, ids, data.Location, len(photos))
+	}
+
 	return data, nil
+}
+
+// parseCoords разбирает строку "lat,lon" в Coords. Возвращает (nil,false), если
+// формат неверный — тогда вызывающий просто не трогает координаты.
+func parseCoords(raw string) (*Coords, bool) {
+	parts := strings.Split(raw, ",")
+	if len(parts) != 2 {
+		return nil, false
+	}
+	lat, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	lon, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err1 != nil || err2 != nil {
+		return nil, false
+	}
+	return &Coords{Lat: lat, Lon: lon}, true
+}
+
+// buildCabins грузит товары-домики и структурирует каждый. В конце — дедуп:
+// почти одинаковые варианты (А-фрейм светлый/тёмный) схлопываются в один.
+func (s *server) buildCabins(ctx context.Context, ids []string, location string, photoCount int) []Cabin {
+	items, err := s.client.GetMarketItemsByIDs(ctx, ids)
+	if err != nil {
+		log.Printf("market items %v: %v (пропускаю домики)", ids, err)
+		return []Cabin{}
+	}
+
+	cabins := make([]Cabin, 0, len(items))
+	for _, item := range items {
+		cabin := Cabin{
+			Title:       item.Title,
+			Price:       item.Price.Text,
+			Description: item.Description,
+		}
+		// Структурируем описание домика → что в нём есть (главное для нас).
+		listing := extract.Listing{
+			Title:       item.Title,
+			Description: item.Description,
+			Location:    location,
+			Price:       item.Price.Text,
+			PhotoCount:  photoCount,
+		}
+		if prop, err := s.extractor.Extract(ctx, listing); err != nil {
+			log.Printf("extract cabin %q: %v", item.Title, err)
+		} else {
+			cabin.Property = prop
+		}
+		cabins = append(cabins, cabin)
+	}
+
+	return dedupCabins(cabins)
+}
+
+// reItemTail — хвост числа из URL/строки товара. У ссылки вида
+// .../aframe-svetly-arenda-211011668-6377368 последнее число — это id товара.
+var reItemTail = regexp.MustCompile(`(\d+)\D*$`)
+
+// marketIDsFromParam превращает параметр items (URL или id через запятую) в
+// абсолютные market-id вида "<ownerID>_<item>". Принимаем три формата:
+//   - полный id "-211011668_6377368" → как есть;
+//   - ссылку ".../...-211011668-6377368" → берём хвостовое число + наш ownerID;
+//   - голый id товара "6377368" → тоже + ownerID.
+// ownerID уже со знаком (минус для групп), поэтому склейка даёт верный market-id.
+func marketIDsFromParam(raw string, ownerID int64) []string {
+	ids := make([]string, 0)
+	for _, tok := range strings.Split(raw, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		if strings.Contains(tok, "_") {
+			ids = append(ids, tok) // уже полный market-id
+			continue
+		}
+		if m := reItemTail.FindStringSubmatch(tok); m != nil {
+			ids = append(ids, fmt.Sprintf("%d_%s", ownerID, m[1]))
+		}
+	}
+	return ids
+}
+
+// dedupCabins схлопывает почти одинаковые домики. Сигнатура домика — набор его
+// удобств (из Property). Если у двух домиков удобства совпадают на ≥80%, второй
+// считаем вариантом первого: его заголовок уходит в Variants, а отдельной
+// карточкой он не дублируется.
+const dupThreshold = 0.8
+
+func dedupCabins(cabins []Cabin) []Cabin {
+	kept := make([]Cabin, 0, len(cabins))
+	sigs := make([]map[string]bool, 0, len(cabins))
+
+	for _, c := range cabins {
+		sig := amenitySignature(c)
+		merged := false
+		for i := range kept {
+			if jaccard(sig, sigs[i]) >= dupThreshold {
+				// Дубль: добавляем его название как вариант к уже сохранённому.
+				kept[i].Variants = append(kept[i].Variants, c.Title)
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			kept = append(kept, c)
+			sigs = append(sigs, sig)
+		}
+	}
+	return kept
+}
+
+// amenitySignature — множество «меток» домика: удобства + доп.услуги. Это и есть
+// его «отпечаток» для сравнения. Пустой Property → пустая сигнатура (не схлопнем).
+func amenitySignature(c Cabin) map[string]bool {
+	sig := make(map[string]bool)
+	if c.Property == nil {
+		return sig
+	}
+	for _, g := range c.Property.AmenityGroups {
+		for _, item := range g.Items {
+			sig[item] = true
+		}
+	}
+	for _, e := range c.Property.Extras {
+		sig[e.Name] = true
+	}
+	return sig
+}
+
+// jaccard — мера схожести двух множеств: |пересечение| / |объединение|.
+// 1.0 = одинаковы, 0.0 = ничего общего. Классический способ сравнить наборы.
+func jaccard(a, b map[string]bool) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 0 // обе пустые — НЕ считаем дублями (нечего сравнивать)
+	}
+	inter := 0
+	for k := range a {
+		if b[k] {
+			inter++
+		}
+	}
+	union := len(a) + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
 }
 
 // writeJSON — без зависимостей, поэтому остаётся обычной функцией (не методом).

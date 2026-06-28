@@ -25,14 +25,24 @@ const (
 	cacheTTL = 5 * time.Minute
 )
 
-// GlampingData — контракт ответа для фронтенда.
-// omitempty: если товара у объекта нет (скрытый/пустой каталог), эти поля не
-// попадут в JSON вовсе — фронт увидит только photos и отрисует карточку без
-// заголовка/цены, а не с пустыми строками.
+// Coords — гео-координаты объекта. Указатель в GlampingData (см. ниже), чтобы
+// omitempty мог их «выкинуть»: у структуры-значения нет понятия «пустая», а
+// nil-указатель omitempty уберёт.
+type Coords struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+}
+
+// GlampingData — «сырьё», собранное из VK: фото + текст товара + инфо группы.
+// omitempty убирает поля, которых нет (скрытый каталог, не задан адрес и т.п.).
 type GlampingData struct {
-	Title       string   `json:"title,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Price       string   `json:"price,omitempty"`
+	Title       string   `json:"title,omitempty"`       // название товара
+	Description string   `json:"description,omitempty"`  // описание товара (текст)
+	Price       string   `json:"price,omitempty"`        // цена товара
+	About       string   `json:"about,omitempty"`        // описание сообщества
+	Location    string   `json:"location,omitempty"`     // адрес/город
+	Coords      *Coords  `json:"coords,omitempty"`       // координаты (если заданы)
+	Contact     string   `json:"contact,omitempty"`      // телефон
 	Photos      []string `json:"photos"`
 }
 
@@ -155,6 +165,20 @@ func (s *server) buildGlampingData(ctx context.Context, domain string) (Glamping
 		data.Title = item.Title
 		data.Description = item.Description
 		data.Price = item.Price.Text
+	}
+
+	// Инфо сообщества: описание группы + локация + контакт. Метод работает
+	// только для групп; для пользователей VK вернёт ошибку — тогда просто
+	// пропускаем эти поля (graceful degradation), не роняя весь запрос.
+	if info, err := s.client.GetGroupInfo(ctx, domain); err != nil {
+		log.Printf("group info for %q: %v (пропускаю локацию)", domain, err)
+	} else {
+		data.About = info.Description
+		data.Location = info.Address
+		data.Contact = info.Phone
+		if info.Latitude != 0 || info.Longitude != 0 {
+			data.Coords = &Coords{Lat: info.Latitude, Lon: info.Longitude}
+		}
 	}
 
 	return data, nil

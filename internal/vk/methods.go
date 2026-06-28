@@ -104,3 +104,38 @@ func (c *Client) GetMarketItemByID(ctx context.Context, itemID string) (*MarketI
 
 	return &data.Items[0], nil
 }
+
+// GetGroupInfo тянет инфо о сообществе по домену: название, описание, адрес/
+// координаты, телефон. Работает ТОЛЬКО для групп (для пользователей VK вернёт
+// ошибку — вызывающий решает, что с этим делать).
+func (c *Client) GetGroupInfo(ctx context.Context, domain string) (*GroupInfo, error) {
+	params := url.Values{}
+	params.Set("group_id", domain)
+	params.Set("fields", "description,place,city,contacts")
+
+	var groups []groupByID
+	if err := c.call(ctx, "groups.getById", params, &groups); err != nil {
+		return nil, fmt.Errorf("get group info %q: %w", domain, err)
+	}
+	if len(groups) == 0 {
+		return nil, fmt.Errorf("group %q not found", domain)
+	}
+	g := groups[0]
+
+	// Маппим «сырые» поля VK в наш плоский GroupInfo. Адрес — из place, а если
+	// его нет, подставляем город.
+	info := &GroupInfo{
+		Name:        g.Name,
+		Description: g.Description,
+		Address:     g.Place.Address,
+		Latitude:    g.Place.Latitude,
+		Longitude:   g.Place.Longitude,
+	}
+	if info.Address == "" {
+		info.Address = g.City.Title
+	}
+	if len(g.Contacts) > 0 {
+		info.Phone = g.Contacts[0].Phone
+	}
+	return info, nil
+}

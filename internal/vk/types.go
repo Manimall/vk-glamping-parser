@@ -49,3 +49,38 @@ type marketGetResponse struct {
 	Count int          `json:"count"`
 	Items []MarketItem `json:"items"`
 }
+
+// --- groups.getById ---
+
+// GroupInfo — «плоский» удобный результат для вызывающего: название, описание,
+// адрес/координаты, телефон. Собираем его из «сырых» полей ответа VK ниже.
+type GroupInfo struct {
+	Name        string
+	Description string
+	Address     string
+	Latitude    float64
+	Longitude   float64
+	Phone       string
+}
+
+type groupCity struct {
+	Title string `json:"title"`
+}
+
+type groupPlace struct {
+	Address   string  `json:"address"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+type groupContact struct {
+	Phone string `json:"phone"`
+}
+
+type groupByID struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	City        groupCity      `json:"city"`
+	Place       groupPlace     `json:"place"`
+	Contacts    []groupContact `json:"contacts"`
+}

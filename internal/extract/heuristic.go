@@ -28,9 +28,9 @@ type amenityRule struct {
 }
 
 const (
-	groupInside     = "В домике"
-	groupTerritory  = "На территории"
-	groupEntertain  = "Развлечения"
+	groupInside    = "В домике"
+	groupTerritory = "На территории"
+	groupEntertain = "Развлечения"
 )
 
 // amenityRules — словарь удобств. Порядок задаёт порядок появления в карточке.
@@ -84,12 +84,19 @@ var extraRules = []amenityRule{
 	{[]string{"трансфер"}, "Трансфер", ""},
 }
 
-// Регэкспы для фактов. (?i) — без учёта регистра. Вместимость пишут по-разному:
-// «до 4 чел», «максимум 4 человека» (reCapacity) или «гостей: 8», «8 спальных
-// мест» (reGuests) — поэтому два шаблона. Площадь — «84 м²».
+// Регэкспы для фактов. (?i) — без учёта регистра. Вместимость пишут по-разному,
+// поэтому несколько шаблонов в порядке надёжности:
+//   - reGuests   — «Количество гостей: 8» (число ПОСЛЕ слова — самый явный формат,
+//     не ловит «на 6 гостей» из строки про сервировку);
+//   - reSleeping — «8 спальных мест»;
+//   - reCapacity — «до 4 чел», «максимум 4 человека» (без «гост», чтобы снова не
+//     цеплять «на 6 гостей»).
+//
+// Площадь — «84 м²».
 var (
-	reCapacity = regexp.MustCompile(`(?i)(?:до|на|максимум|для)\s+(\d+)\s*(?:чел|гост|персон|человек)`)
-	reGuests   = regexp.MustCompile(`(?i)(?:гостей|спальных\s+мест)\D{0,4}(\d+)|(\d+)\s*(?:гостей|спальных\s+мест)`)
+	reGuests   = regexp.MustCompile(`(?i)гостей\D{0,4}(\d+)`)
+	reSleeping = regexp.MustCompile(`(?i)(\d+)\s*спальных\s+мест`)
+	reCapacity = regexp.MustCompile(`(?i)(?:до|на|максимум|для)\s+(\d+)\s*(?:чел|человек|персон)`)
 	reArea     = regexp.MustCompile(`(?i)(\d+)\s*(?:м²|м2|кв\.?\s*м)`)
 )
 
@@ -152,17 +159,14 @@ func buildFacts(in Listing) []Fact {
 	text := in.Description + " " + in.About
 	facts := make([]Fact, 0)
 
-	// Вместимость: сперва явное «гостей: N» / «N спальных мест» (точнее всего),
-	// иначе фоллбэк на «до N чел» / «максимум N человека».
-	if m := reGuests.FindStringSubmatch(text); m != nil {
-		// У reGuests число в группе 1 ИЛИ 2 (две альтернативы) — берём непустую.
-		n := m[1]
-		if n == "" {
-			n = m[2]
-		}
-		facts = append(facts, Fact{Label: "Вместимость", Value: n + " гостей"})
-	} else if m := reCapacity.FindStringSubmatch(text); m != nil {
-		facts = append(facts, Fact{Label: "Вместимость", Value: "до " + m[1] + " чел."})
+	// Вместимость: по убыванию надёжности формата.
+	switch {
+	case reGuests.MatchString(text):
+		facts = append(facts, Fact{Label: "Вместимость", Value: reGuests.FindStringSubmatch(text)[1] + " гостей"})
+	case reSleeping.MatchString(text):
+		facts = append(facts, Fact{Label: "Вместимость", Value: reSleeping.FindStringSubmatch(text)[1] + " гостей"})
+	case reCapacity.MatchString(text):
+		facts = append(facts, Fact{Label: "Вместимость", Value: "до " + reCapacity.FindStringSubmatch(text)[1] + " чел."})
 	}
 	if m := reArea.FindStringSubmatch(text); m != nil {
 		facts = append(facts, Fact{Label: "Площадь", Value: m[1] + " м²"})

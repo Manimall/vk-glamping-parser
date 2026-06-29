@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 // ResolveOwnerID превращает короткое имя (домен) в owner_id для последующих
@@ -33,9 +35,10 @@ func (c *Client) ResolveOwnerID(ctx context.Context, domain string) (int64, erro
 	}
 }
 
-// GetPhotos возвращает URL фотографий со стены — по одному (самому крупному)
-// URL на каждое фото.
-func (c *Client) GetPhotos(ctx context.Context, ownerID int64) ([]string, error) {
+// GetPhotos возвращает URL фотографий со стены: выбирает limit ЛУЧШИХ по
+// разрешению (площадь = ширина×высота отсекает мелкие репосты/скриншоты) и
+// отдаёт их в исходном порядке стены. limit<=0 — без ограничения.
+func (c *Client) GetPhotos(ctx context.Context, ownerID int64, limit int) ([]string, error) {
 	params := url.Values{}
 	params.Set("owner_id", strconv.FormatInt(ownerID, 10))
 	params.Set("album_id", "wall")
@@ -46,18 +49,44 @@ func (c *Client) GetPhotos(ctx context.Context, ownerID int64) ([]string, error)
 		return nil, fmt.Errorf("get photos for owner %d: %w", ownerID, err)
 	}
 
-	urls := make([]string, 0, len(data.Items))
-	for _, p := range data.Items {
-		if best := bestPhotoURL(p.Sizes); best != "" {
-			urls = append(urls, best)
-		}
-	}
-	return urls, nil
+	return selectBestPhotos(data.Items, limit), nil
 }
 
-// bestPhotoURL — ручной reduce: ищем размер с максимальной площадью.
+// selectBestPhotos выбирает limit лучших фото по площади и возвращает их URL в
+// ИСХОДНОМ порядке (чтобы галерея читалась естественно, а не от крупного к мелкому).
+func selectBestPhotos(photos []photo, limit int) []string {
+	// scored — фото с его позицией и площадью лучшего размера.
+	type scored struct {
+		idx  int
+		url  string
+		area int
+	}
+
+	ranked := make([]scored, 0, len(photos))
+	for i, p := range photos {
+		if u, area := bestPhotoURL(p.Sizes); u != "" {
+			ranked = append(ranked, scored{idx: i, url: u, area: area})
+		}
+	}
+
+	// Меньше лимита (или лимит выключен) — отдаём все как есть.
+	if limit > 0 && len(ranked) > limit {
+		// По площади убыв. → берём top-limit → возвращаем в исходный порядок.
+		sort.Slice(ranked, func(i, j int) bool { return ranked[i].area > ranked[j].area })
+		ranked = ranked[:limit]
+		sort.Slice(ranked, func(i, j int) bool { return ranked[i].idx < ranked[j].idx })
+	}
+
+	urls := make([]string, len(ranked))
+	for i, s := range ranked {
+		urls[i] = s.url
+	}
+	return urls
+}
+
+// bestPhotoURL — ручной reduce: размер с максимальной площадью + сама площадь.
 // Типы "w" и "z" у VK — самые большие, поэтому max по площади их и выберет.
-func bestPhotoURL(sizes []photoSize) string {
+func bestPhotoURL(sizes []photoSize) (string, int) {
 	best := ""
 	maxArea := -1
 	for _, s := range sizes {
@@ -67,42 +96,26 @@ func bestPhotoURL(sizes []photoSize) string {
 			best = s.URL
 		}
 	}
-	return best
+	return best, maxArea
 }
 
-// GetMarketItems возвращает товары из раздела «Товары» владельца.
-func (c *Client) GetMarketItems(ctx context.Context, ownerID int64) ([]MarketItem, error) {
-	params := url.Values{}
-	params.Set("owner_id", strconv.FormatInt(ownerID, 10))
-	params.Set("count", defaultCount)
-
-	var data marketGetResponse
-	if err := c.call(ctx, "market.get", params, &data); err != nil {
-		return nil, fmt.Errorf("get market items for owner %d: %w", ownerID, err)
+// GetMarketItemsByIDs тянет товары по абсолютным id вида "<owner_id>_<item_id>"
+// за ОДИН вызов (item_ids у VK принимает список через запятую). Работает даже
+// когда каталог скрыт настройками приватности и market.get отдаёт пусто.
+func (c *Client) GetMarketItemsByIDs(ctx context.Context, itemIDs []string) ([]MarketItem, error) {
+	if len(itemIDs) == 0 {
+		return nil, nil
 	}
-	return data.Items, nil
-}
 
-// GetMarketItemByID тянет ОДИН товар по абсолютному id вида "<owner_id>_<item_id>"
-// (например "-211011668_6377368"). Работает даже когда каталог скрыт настройками
-// приватности и market.get отдаёт пусто.
-func (c *Client) GetMarketItemByID(ctx context.Context, itemID string) (*MarketItem, error) {
 	params := url.Values{}
-	params.Set("item_ids", itemID)
-	params.Set("extended", "1")
+	params.Set("item_ids", strings.Join(itemIDs, ","))
+	params.Set("extended", "1") // полные поля товара (описание и т.п.)
 
 	var data marketGetResponse
 	if err := c.call(ctx, "market.getById", params, &data); err != nil {
-		return nil, fmt.Errorf("get market item %q: %w", itemID, err)
+		return nil, fmt.Errorf("get market items by ids: %w", err)
 	}
-
-	// items[0] на пустом слайсе — ПАНИКА (index out of range), а не undefined
-	// как в JS. Поэтому проверяем длину ПЕРЕД индексацией.
-	if len(data.Items) == 0 {
-		return nil, fmt.Errorf("market item %q not found", itemID)
-	}
-
-	return &data.Items[0], nil
+	return data.Items, nil
 }
 
 // GetGroupInfo тянет инфо о сообществе по домену: название, описание, адрес/

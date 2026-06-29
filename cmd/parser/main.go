@@ -1,13 +1,15 @@
 // Command parser — HTTP-микросервис: по запросу собирает карточку объекта из
 // VK и отдаёт её JSON-ом. Фронтенд ходит сюда вместо чтения статичного файла.
+//
+// Код пакета разбит по файлам: main.go — точка входа и сборка зависимостей;
+// types.go — структуры данных ответа; handler.go — обработка запроса;
+// helpers.go — мелкие чистые функции (парсинг, дедуп, запись JSON).
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,55 +18,64 @@ import (
 
 	"vk-parser/internal/cache"
 	"vk-parser/internal/config"
+	"vk-parser/internal/extract"
+	"vk-parser/internal/geocode"
 	"vk-parser/internal/vk"
 )
 
 const (
-	serverAddr = ":8080"
 	// cacheTTL — сколько держим карточку в кэше, прежде чем перепарсить VK.
 	cacheTTL = 5 * time.Minute
+	// maxPhotos — сколько лучших фото оставляем в галерее.
+	maxPhotos = 15
+	// HTTP-таймауты сервера.
+	readTimeout     = 5 * time.Second
+	writeTimeout    = 30 * time.Second // поход в VK может быть небыстрым
+	idleTimeout     = 60 * time.Second
+	shutdownTimeout = 10 * time.Second
 )
-
-// Coords — гео-координаты объекта. Указатель в GlampingData (см. ниже), чтобы
-// omitempty мог их «выкинуть»: у структуры-значения нет понятия «пустая», а
-// nil-указатель omitempty уберёт.
-type Coords struct {
-	Lat float64 `json:"lat"`
-	Lon float64 `json:"lon"`
-}
-
-// GlampingData — «сырьё», собранное из VK: фото + текст товара + инфо группы.
-// omitempty убирает поля, которых нет (скрытый каталог, не задан адрес и т.п.).
-type GlampingData struct {
-	Title       string   `json:"title,omitempty"`       // название товара
-	Description string   `json:"description,omitempty"`  // описание товара (текст)
-	Price       string   `json:"price,omitempty"`        // цена товара
-	About       string   `json:"about,omitempty"`        // описание сообщества
-	Location    string   `json:"location,omitempty"`     // адрес/город
-	Coords      *Coords  `json:"coords,omitempty"`       // координаты (если заданы)
-	Contact     string   `json:"contact,omitempty"`      // телефон
-	Photos      []string `json:"photos"`
-}
 
 // server держит ОБЩИЕ зависимости приложения. Хендлеры — это методы server,
 // поэтому они берут зависимости из ресивера (s.client, s.store), а не из
 // длинного списка аргументов. Новая зависимость = новое поле здесь, без правки
 // сигнатур хендлеров.
 type server struct {
-	client *vk.Client
-	store  *cache.Cache[GlampingData]
+	// client и geocoder — ИНТЕРФЕЙСЫ (см. deps.go), а не конкретные типы. server
+	// не привязан к *vk.Client/*geocode.Client: в проде кладём настоящие, в
+	// тестах — фейки без сети.
+	client    vkAPI
+	store     *cache.Cache[GlampingData]
+	extractor extract.Extractor
+	geocoder  geocoderAPI
+	// dataDir — каталог конфигов объектов. Поле (а не глобальная константа),
+	// чтобы тест мог указать свой testdata.
+	dataDir string
 }
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("startup: %v", err)
+		slog.Error("startup failed", "err", err)
+		os.Exit(1)
 	}
 
 	// Composition root: единственное место, где собираем граф зависимостей.
 	srv := &server{
-		client: vk.NewClient(cfg.VKToken),
-		store:  cache.New[GlampingData](cacheTTL),
+		client:   vk.NewClient(cfg.VKToken),
+		store:    cache.New[GlampingData](cacheTTL),
+		geocoder: geocode.New(),
+		dataDir:  cfg.DataDir,
+	}
+
+	// Выбор движка извлечения. Есть ключ — берём умный LLM; нет — бесплатную
+	// эвристику. Структура одинаковая, отличается только «начинка» — в этом и
+	// смысл интерфейса: остальной код (хендлер) не меняется ни на строку.
+	if cfg.AnthropicKey != "" {
+		srv.extractor = extract.NewLLM(cfg.AnthropicKey)
+		slog.Info("извлечение: LLM (ANTHROPIC_API_KEY задан)")
+	} else {
+		srv.extractor = extract.NewHeuristic()
+		slog.Info("извлечение: эвристика (бесплатно, без ключа)")
 	}
 
 	// Роутер. srv.handleGlamping — это «method value»: метод, привязанный к srv,
@@ -76,11 +87,11 @@ func main() {
 	// Транспорт (http.Server) — отдельная сущность от нашего server. Свой сервер
 	// с таймаутами (НЕ http.ListenAndServe без настроек — он без таймаутов).
 	httpServer := &http.Server{
-		Addr:         serverAddr,
+		Addr:         cfg.ServerAddr,
 		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 30 * time.Second, // поход в VK может быть небыстрым
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
 	}
 
 	// ctx отменяется при SIGINT (Ctrl+C) или SIGTERM (docker stop / systemd).
@@ -89,108 +100,22 @@ func main() {
 
 	// Слушаем в отдельной горутине, чтобы main мог ждать сигнал.
 	go func() {
-		log.Printf("VK parser слушает на %s", serverAddr)
+		slog.Info("VK parser слушает", "addr", cfg.ServerAddr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server: %v", err)
+			slog.Error("server failed", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("получен сигнал остановки, завершаем…")
+	slog.Info("получен сигнал остановки, завершаем…")
 
-	// Даём до 10с на доработку текущих запросов, потом обрываем.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Даём время на доработку текущих запросов, потом обрываем.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("graceful shutdown: %v", err)
+		slog.Error("graceful shutdown failed", "err", err)
+		os.Exit(1)
 	}
-	log.Println("сервер остановлен корректно")
-}
-
-// handleGlamping — теперь МЕТОД server. Сигнатура — ровно http.HandlerFunc
-// (w, r), без зависимостей в аргументах: они доступны через ресивер s.
-func (s *server) handleGlamping(w http.ResponseWriter, r *http.Request) {
-	domain := r.URL.Query().Get("domain")
-	if domain == "" {
-		http.Error(w, "query param 'domain' is required", http.StatusBadRequest)
-		return
-	}
-
-	// Cache hit — отдаём из памяти, в VK не ходим.
-	if data, ok := s.store.Get(domain); ok {
-		w.Header().Set("X-Cache", "HIT")
-		writeJSON(w, data)
-		return
-	}
-
-	// Cache miss → идём в VK. r.Context() отменяется, если клиент отвалился.
-	data, err := s.buildGlampingData(r.Context(), domain)
-	if err != nil {
-		log.Printf("build data for %q: %v", domain, err)
-		http.Error(w, "failed to fetch data from VK", http.StatusBadGateway)
-		return
-	}
-
-	s.store.Set(domain, data)
-	w.Header().Set("X-Cache", "MISS")
-	writeJSON(w, data)
-}
-
-// buildGlampingData — тоже метод server: «бизнес-логика» одного запроса.
-// Берёт VK-клиент из ресивера (s.client), HTTP не знает.
-func (s *server) buildGlampingData(ctx context.Context, domain string) (GlampingData, error) {
-	ownerID, err := s.client.ResolveOwnerID(ctx, domain)
-	if err != nil {
-		return GlampingData{}, fmt.Errorf("resolve: %w", err)
-	}
-
-	photos, err := s.client.GetPhotos(ctx, ownerID)
-	if err != nil {
-		return GlampingData{}, fmt.Errorf("photos: %w", err)
-	}
-
-	data := GlampingData{Photos: photos}
-
-	// Товары резолвим ДИНАМИЧЕСКИ по владельцу — без захардкоженного id.
-	items, err := s.client.GetMarketItems(ctx, ownerID)
-	if err != nil {
-		return GlampingData{}, fmt.Errorf("market: %w", err)
-	}
-
-	// «Данных может не быть»: каталог скрыт настройками приватности или пуст.
-	// Тогда отдаём карточку только с фото (фоллбэк), а не падаем. Берём первый
-	// товар как основной для карточки.
-	if len(items) > 0 {
-		item := items[0]
-		data.Title = item.Title
-		data.Description = item.Description
-		data.Price = item.Price.Text
-	}
-
-	// Инфо сообщества: описание группы + локация + контакт. Метод работает
-	// только для групп; для пользователей VK вернёт ошибку — тогда просто
-	// пропускаем эти поля (graceful degradation), не роняя весь запрос.
-	if info, err := s.client.GetGroupInfo(ctx, domain); err != nil {
-		log.Printf("group info for %q: %v (пропускаю локацию)", domain, err)
-	} else {
-		data.About = info.Description
-		data.Location = info.Address
-		data.Contact = info.Phone
-		if info.Latitude != 0 || info.Longitude != 0 {
-			data.Coords = &Coords{Lat: info.Latitude, Lon: info.Longitude}
-		}
-	}
-
-	return data, nil
-}
-
-// writeJSON — без зависимостей, поэтому остаётся обычной функцией (не методом).
-// DRY: одна запись JSON-ответа для веток HIT и MISS.
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		log.Printf("encode response: %v", err)
-	}
+	slog.Info("сервер остановлен корректно")
 }

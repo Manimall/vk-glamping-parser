@@ -76,7 +76,7 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 
 	// Пер-объектный конфиг data/<domain>.json — ручные данные, которых нет в VK
 	// (координаты, карта, id товаров, «ручные» домики с Avito). Нет файла — nil.
-	cfg, err := objects.Load(dataDir, q.domain)
+	cfg, err := objects.Load(s.dataDir, q.domain)
 	if err != nil {
 		log.Printf("object config %q: %v (пропускаю)", q.domain, err)
 	}

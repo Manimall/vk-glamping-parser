@@ -38,14 +38,16 @@ const (
 // длинного списка аргументов. Новая зависимость = новое поле здесь, без правки
 // сигнатур хендлеров.
 type server struct {
-	client *vk.Client
-	store  *cache.Cache[GlampingData]
-	// extractor — ИНТЕРФЕЙС, а не конкретный тип. server не знает (и не должен),
-	// чем именно извлекают: бесплатной эвристикой или платным LLM. Подменить
-	// движок = передать сюда другой объект, реализующий extract.Extractor.
+	// client и geocoder — ИНТЕРФЕЙСЫ (см. deps.go), а не конкретные типы. server
+	// не привязан к *vk.Client/*geocode.Client: в проде кладём настоящие, в
+	// тестах — фейки без сети.
+	client    vkAPI
+	store     *cache.Cache[GlampingData]
 	extractor extract.Extractor
-	// geocoder — получает координаты из адреса, когда их не задали вручную.
-	geocoder *geocode.Client
+	geocoder  geocoderAPI
+	// dataDir — каталог конфигов объектов. Поле (а не глобальная константа),
+	// чтобы тест мог указать свой testdata.
+	dataDir string
 }
 
 func main() {
@@ -59,6 +61,7 @@ func main() {
 		client:   vk.NewClient(cfg.VKToken),
 		store:    cache.New[GlampingData](cacheTTL),
 		geocoder: geocode.New(),
+		dataDir:  dataDir,
 	}
 
 	// Выбор движка извлечения. Есть ключ — берём умный LLM; нет — бесплатную

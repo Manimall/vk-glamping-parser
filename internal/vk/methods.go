@@ -99,44 +99,9 @@ func bestPhotoURL(sizes []photoSize) (string, int) {
 	return best, maxArea
 }
 
-// GetMarketItems возвращает товары из раздела «Товары» владельца.
-func (c *Client) GetMarketItems(ctx context.Context, ownerID int64) ([]MarketItem, error) {
-	params := url.Values{}
-	params.Set("owner_id", strconv.FormatInt(ownerID, 10))
-	params.Set("count", defaultCount)
-
-	var data marketGetResponse
-	if err := c.call(ctx, "market.get", params, &data); err != nil {
-		return nil, fmt.Errorf("get market items for owner %d: %w", ownerID, err)
-	}
-	return data.Items, nil
-}
-
-// GetMarketItemByID тянет ОДИН товар по абсолютному id вида "<owner_id>_<item_id>"
-// (например "-211011668_6377368"). Работает даже когда каталог скрыт настройками
-// приватности и market.get отдаёт пусто.
-func (c *Client) GetMarketItemByID(ctx context.Context, itemID string) (*MarketItem, error) {
-	params := url.Values{}
-	params.Set("item_ids", itemID)
-	params.Set("extended", "1")
-
-	var data marketGetResponse
-	if err := c.call(ctx, "market.getById", params, &data); err != nil {
-		return nil, fmt.Errorf("get market item %q: %w", itemID, err)
-	}
-
-	// items[0] на пустом слайсе — ПАНИКА (index out of range), а не undefined
-	// как в JS. Поэтому проверяем длину ПЕРЕД индексацией.
-	if len(data.Items) == 0 {
-		return nil, fmt.Errorf("market item %q not found", itemID)
-	}
-
-	return &data.Items[0], nil
-}
-
-// GetMarketItemsByIDs тянет НЕСКОЛЬКО товаров за ОДИН вызов: item_ids у VK
-// принимает список через запятую. Так мы грузим все домики глэмпинга разом,
-// а не по запросу на каждый (меньше round-trip'ов к VK).
+// GetMarketItemsByIDs тянет товары по абсолютным id вида "<owner_id>_<item_id>"
+// за ОДИН вызов (item_ids у VK принимает список через запятую). Работает даже
+// когда каталог скрыт настройками приватности и market.get отдаёт пусто.
 func (c *Client) GetMarketItemsByIDs(ctx context.Context, itemIDs []string) ([]MarketItem, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
@@ -144,6 +109,7 @@ func (c *Client) GetMarketItemsByIDs(ctx context.Context, itemIDs []string) ([]M
 
 	params := url.Values{}
 	params.Set("item_ids", strings.Join(itemIDs, ","))
+	params.Set("extended", "1") // полные поля товара (описание и т.п.)
 
 	var data marketGetResponse
 	if err := c.call(ctx, "market.getById", params, &data); err != nil {

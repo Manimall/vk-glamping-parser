@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 
-	"vk-parser/internal/geocode"
 	"vk-parser/internal/vk"
 )
 
@@ -21,7 +20,9 @@ type vkAPI interface {
 	GetMarketItemsByIDs(ctx context.Context, itemIDs []string) ([]vk.MarketItem, error)
 }
 
-// geocoderAPI — то, что хендлеру нужно от геокодера. *geocode.Client удовлетворяет.
+// geocoderAPI — то, что хендлеру нужно от геокодера. Возвращает lat/lon отдельными
+// значениями (без своего типа Coords), чтобы не плодить дубль структуры координат.
+// *geocode.Client удовлетворяет.
 type geocoderAPI interface {
-	Geocode(ctx context.Context, address string) (*geocode.Coords, error)
+	Geocode(ctx context.Context, address string) (lat, lon float64, err error)
 }

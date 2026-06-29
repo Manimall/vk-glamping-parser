@@ -7,7 +7,6 @@ import (
 
 	"vk-parser/internal/cache"
 	"vk-parser/internal/extract"
-	"vk-parser/internal/geocode"
 	"vk-parser/internal/vk"
 )
 
@@ -35,14 +34,14 @@ func (f *fakeVK) GetMarketItemsByIDs(_ context.Context, _ []string) ([]vk.Market
 }
 
 type fakeGeocoder struct {
-	coords *geocode.Coords
-	err    error
-	called bool
+	lat, lon float64
+	err      error
+	called   bool
 }
 
-func (f *fakeGeocoder) Geocode(_ context.Context, _ string) (*geocode.Coords, error) {
+func (f *fakeGeocoder) Geocode(_ context.Context, _ string) (lat, lon float64, err error) {
 	f.called = true
-	return f.coords, f.err
+	return f.lat, f.lon, f.err
 }
 
 // newTestServer собирает server на фейках + реальной (офлайн) эвристике.
@@ -124,7 +123,7 @@ func TestBuildFromConfig(t *testing.T) {
 // Координат нет нигде, но есть адрес → срабатывает геокодер.
 func TestGeocoderFallback(t *testing.T) {
 	fvk := &fakeVK{ownerID: 1, groupErr: errFake}
-	fgeo := &fakeGeocoder{coords: &geocode.Coords{Lat: 56.99, Lon: 40.98}}
+	fgeo := &fakeGeocoder{lat: 56.99, lon: 40.98}
 	srv := newTestServer(fvk, fgeo)
 
 	data, err := srv.buildGlampingData(context.Background(), glampingQuery{domain: "cfg_nocoords"})
@@ -142,7 +141,7 @@ func TestGeocoderFallback(t *testing.T) {
 // Ручные координаты приоритетнее геокодера: при наличии координат в сеть не идём.
 func TestManualCoordsBeatGeocoder(t *testing.T) {
 	fvk := &fakeVK{ownerID: 1, groupErr: errFake}
-	fgeo := &fakeGeocoder{coords: &geocode.Coords{Lat: 0, Lon: 0}}
+	fgeo := &fakeGeocoder{lat: 99, lon: 99} // не должен быть использован
 	srv := newTestServer(fvk, fgeo)
 
 	data, err := srv.buildGlampingData(context.Background(), glampingQuery{domain: "cfg_coords"})

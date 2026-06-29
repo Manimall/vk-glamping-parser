@@ -56,6 +56,11 @@ func TestMarketIDsFromParam(t *testing.T) {
 			want: []string{"-211011668_6493879"},
 		},
 		{
+			name: "ссылка с query-хвостом (?p=2 не должен перебить id)",
+			raw:  "https://vk.com/market/product/aframe-211011668-6377368?p=2",
+			want: []string{"-211011668_6377368"},
+		},
+		{
 			name: "несколько через запятую",
 			raw:  "6377368, 6493879",
 			want: []string{"-211011668_6377368", "-211011668_6493879"},
@@ -124,5 +129,33 @@ func TestDedupCabins(t *testing.T) {
 	}
 	if got[1].Title != "BALI" {
 		t.Errorf("второй домик должен быть BALI, получил %q", got[1].Title)
+	}
+}
+
+// Разные типы домиков с ОДИНАКОВЫМИ удобствами НЕ должны схлопываться
+// (защита от потери цены/описания — gate по первому слову названия).
+func TestDedupKeepsDifferentFamilies(t *testing.T) {
+	cabins := []Cabin{
+		cabinWith("AFRAME светлый", "Кухня", "Ванная", "ТВ", "Интернет", "Мангал"),
+		cabinWith("BALI домик", "Кухня", "Ванная", "ТВ", "Интернет", "Мангал"),
+	}
+	got := dedupCabins(cabins)
+	if len(got) != 2 {
+		t.Fatalf("разные типы (AFRAME/BALI) не должны схлопываться, получил %d", len(got))
+	}
+}
+
+func TestIsValidDomain(t *testing.T) {
+	valid := []string{"elkidom37", "scandi.villa", "a_b.c123"}
+	invalid := []string{"../etc", "a/b", "", "a b", "..%2f"}
+	for _, d := range valid {
+		if !isValidDomain(d) {
+			t.Errorf("домен %q должен быть валиден", d)
+		}
+	}
+	for _, d := range invalid {
+		if isValidDomain(d) {
+			t.Errorf("домен %q должен быть отвергнут", d)
+		}
 	}
 }

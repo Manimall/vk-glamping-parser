@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -24,6 +24,13 @@ func (s *server) handleGlamping(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "query param 'domain' is required", http.StatusBadRequest)
 		return
 	}
+	// domain идёт и в VK-вызовы, и в путь файла конфига (objects.Load), поэтому
+	// валидируем: только буквы/цифры/._ (формат VK screen name). Так отсекаем
+	// path-traversal вида "../secret" из недоверенного параметра.
+	if !isValidDomain(q.domain) {
+		http.Error(w, "invalid 'domain'", http.StatusBadRequest)
+		return
+	}
 
 	// Cache hit — отдаём из памяти, в VK не ходим.
 	if data, ok := s.store.Get(q.cacheKey()); ok {
@@ -35,7 +42,7 @@ func (s *server) handleGlamping(w http.ResponseWriter, r *http.Request) {
 	// Cache miss → идём в VK. r.Context() отменяется, если клиент отвалился.
 	data, err := s.buildGlampingData(r.Context(), q)
 	if err != nil {
-		log.Printf("build data for %q: %v", q.domain, err)
+		slog.Warn("build data failed", "domain", q.domain, "err", err)
 		http.Error(w, "failed to fetch data from VK", http.StatusBadGateway)
 		return
 	}
@@ -63,7 +70,7 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 	// Объект-уровень: название/локация/контакт берём из инфо сообщества.
 	// Метод только для групп; для пользователей VK вернёт ошибку — graceful.
 	if info, err := s.client.GetGroupInfo(ctx, q.domain); err != nil {
-		log.Printf("group info for %q: %v (пропускаю инфо объекта)", q.domain, err)
+		slog.Warn("group info skipped", "domain", q.domain, "err", err)
 	} else {
 		data.Title = info.Name
 		data.About = info.Description
@@ -78,7 +85,7 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 	// (координаты, карта, id товаров, «ручные» домики с Avito). Нет файла — nil.
 	cfg, err := objects.Load(s.dataDir, q.domain)
 	if err != nil {
-		log.Printf("object config %q: %v (пропускаю)", q.domain, err)
+		slog.Warn("object config skipped", "domain", q.domain, "err", err)
 	}
 
 	// Слияние источников. Приоритет — у параметров запроса; чего нет в запросе,
@@ -110,10 +117,10 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 	// Фоллбэк: координат нет, но есть адрес → получаем их геокодером (бесплатно).
 	// Ручные координаты приоритетнее, поэтому ходим в сеть только при их отсутствии.
 	if data.Coords == nil && data.Location != "" {
-		if c, err := s.geocoder.Geocode(ctx, data.Location); err != nil {
-			log.Printf("geocode %q: %v (без координат)", data.Location, err)
+		if lat, lon, err := s.geocoder.Geocode(ctx, data.Location); err != nil {
+			slog.Warn("geocode failed", "address", data.Location, "err", err)
 		} else {
-			data.Coords = &Coords{Lat: c.Lat, Lon: c.Lon}
+			data.Coords = &Coords{Lat: lat, Lon: lon}
 		}
 	}
 
@@ -122,7 +129,7 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 	raw := make([]objects.Cabin, 0)
 	if ids := marketIDsFromParam(itemsRaw, ownerID); len(ids) > 0 {
 		if items, err := s.client.GetMarketItemsByIDs(ctx, ids); err != nil {
-			log.Printf("market items %v: %v (пропускаю товары)", ids, err)
+			slog.Warn("market items skipped", "ids", ids, "err", err)
 		} else {
 			for _, item := range items {
 				raw = append(raw, objects.Cabin{
@@ -154,7 +161,7 @@ func (s *server) structureCabins(ctx context.Context, raw []objects.Cabin, locat
 			PhotoCount:  photoCount,
 		}
 		if prop, err := s.extractor.Extract(ctx, listing); err != nil {
-			log.Printf("extract cabin %q: %v", rc.Title, err)
+			slog.Warn("extract cabin failed", "title", rc.Title, "err", err)
 		} else {
 			cabin.Property = prop
 		}

@@ -9,7 +9,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,13 +24,15 @@ import (
 )
 
 const (
-	serverAddr = ":8080"
 	// cacheTTL — сколько держим карточку в кэше, прежде чем перепарсить VK.
 	cacheTTL = 5 * time.Minute
-	// dataDir — каталог с пер-объектными конфигами data/<domain>.json.
-	dataDir = "data"
 	// maxPhotos — сколько лучших фото оставляем в галерее.
 	maxPhotos = 15
+	// HTTP-таймауты сервера.
+	readTimeout     = 5 * time.Second
+	writeTimeout    = 30 * time.Second // поход в VK может быть небыстрым
+	idleTimeout     = 60 * time.Second
+	shutdownTimeout = 10 * time.Second
 )
 
 // server держит ОБЩИЕ зависимости приложения. Хендлеры — это методы server,
@@ -53,7 +55,8 @@ type server struct {
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("startup: %v", err)
+		slog.Error("startup failed", "err", err)
+		os.Exit(1)
 	}
 
 	// Composition root: единственное место, где собираем граф зависимостей.
@@ -61,7 +64,7 @@ func main() {
 		client:   vk.NewClient(cfg.VKToken),
 		store:    cache.New[GlampingData](cacheTTL),
 		geocoder: geocode.New(),
-		dataDir:  dataDir,
+		dataDir:  cfg.DataDir,
 	}
 
 	// Выбор движка извлечения. Есть ключ — берём умный LLM; нет — бесплатную
@@ -69,10 +72,10 @@ func main() {
 	// смысл интерфейса: остальной код (хендлер) не меняется ни на строку.
 	if cfg.AnthropicKey != "" {
 		srv.extractor = extract.NewLLM(cfg.AnthropicKey)
-		log.Println("извлечение: LLM (ANTHROPIC_API_KEY задан)")
+		slog.Info("извлечение: LLM (ANTHROPIC_API_KEY задан)")
 	} else {
 		srv.extractor = extract.NewHeuristic()
-		log.Println("извлечение: эвристика (бесплатно, без ключа)")
+		slog.Info("извлечение: эвристика (бесплатно, без ключа)")
 	}
 
 	// Роутер. srv.handleGlamping — это «method value»: метод, привязанный к srv,
@@ -84,11 +87,11 @@ func main() {
 	// Транспорт (http.Server) — отдельная сущность от нашего server. Свой сервер
 	// с таймаутами (НЕ http.ListenAndServe без настроек — он без таймаутов).
 	httpServer := &http.Server{
-		Addr:         serverAddr,
+		Addr:         cfg.ServerAddr,
 		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 30 * time.Second, // поход в VK может быть небыстрым
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
 	}
 
 	// ctx отменяется при SIGINT (Ctrl+C) или SIGTERM (docker stop / systemd).
@@ -97,20 +100,22 @@ func main() {
 
 	// Слушаем в отдельной горутине, чтобы main мог ждать сигнал.
 	go func() {
-		log.Printf("VK parser слушает на %s", serverAddr)
+		slog.Info("VK parser слушает", "addr", cfg.ServerAddr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server: %v", err)
+			slog.Error("server failed", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("получен сигнал остановки, завершаем…")
+	slog.Info("получен сигнал остановки, завершаем…")
 
-	// Даём до 10с на доработку текущих запросов, потом обрываем.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Даём время на доработку текущих запросов, потом обрываем.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("graceful shutdown: %v", err)
+		slog.Error("graceful shutdown failed", "err", err)
+		os.Exit(1)
 	}
-	log.Println("сервер остановлен корректно")
+	slog.Info("сервер остановлен корректно")
 }

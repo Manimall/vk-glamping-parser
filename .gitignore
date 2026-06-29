@@ -6,9 +6,8 @@
 # --- Скомпилированные бинарники ---
 # Бинарь модуля (go build без -o кладёт его сюда)
 /vk-parser
-# Бинарь точки входа (go build ./cmd/parser)
-/parser
-cmd/parser/parser
+# Сборка точки входа кладётся в bin/ (go build -o bin/parser ./app)
+/bin/
 # Windows / прочие платформы
 *.exe
 *.exe~

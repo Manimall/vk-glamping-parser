@@ -24,6 +24,11 @@ coverage.*
 /elkidom_data.json
 /*_data.json
 
+# --- Конфиги реальных объектов (чужой контент) держим локально ---
+# В репо только пример формата data/example.json.
+/data/*.json
+!/data/example.json
+
 # --- Go workspace ---
 go.work
 go.work.sum

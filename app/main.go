@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -53,10 +54,26 @@ type server struct {
 }
 
 func main() {
+	// Флаги. Если задан -export <domain> — собираем галерею фото объекта и выходим
+	// (CLI-режим экспорта), иначе поднимаем HTTP-сервер.
+	exportDomain := flag.String("export", "", "домен объекта: собрать photo-N.webp и выйти (вместо сервера)")
+	exportOut := flag.String("out", "", "каталог для экспортированных фото (по умолчанию export/<domain>)")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("startup failed", "err", err)
 		os.Exit(1)
+	}
+
+	if *exportDomain != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := runExport(ctx, cfg, *exportDomain, *exportOut); err != nil {
+			slog.Error("export failed", "err", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// Composition root: единственное место, где собираем граф зависимостей.

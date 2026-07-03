@@ -52,6 +52,29 @@ func (c *Client) GetPhotos(ctx context.Context, ownerID int64, limit int) ([]str
 	return selectBestPhotos(data.Items, limit), nil
 }
 
+// GetAlbumPhotos возвращает URL лучших размеров фото из КОНКРЕТНОГО альбома,
+// в ПОРЯДКЕ АЛЬБОМА (не пересортировываем: владелец обычно ставит обзорные
+// кадры первыми). Используется для «чистого» источника вместо стены.
+func (c *Client) GetAlbumPhotos(ctx context.Context, ownerID int64, albumID string, count int) ([]string, error) {
+	params := url.Values{}
+	params.Set("owner_id", strconv.FormatInt(ownerID, 10))
+	params.Set("album_id", albumID)
+	params.Set("count", strconv.Itoa(count))
+
+	var data photosGetResponse
+	if err := c.call(ctx, "photos.get", params, &data); err != nil {
+		return nil, fmt.Errorf("get album %s photos for owner %d: %w", albumID, ownerID, err)
+	}
+
+	urls := make([]string, 0, len(data.Items))
+	for _, p := range data.Items {
+		if u, _ := bestPhotoURL(p.Sizes); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	return urls, nil
+}
+
 // selectBestPhotos выбирает limit лучших фото по площади и возвращает их URL в
 // ИСХОДНОМ порядке (чтобы галерея читалась естественно, а не от крупного к мелкому).
 func selectBestPhotos(photos []photo, limit int) []string {

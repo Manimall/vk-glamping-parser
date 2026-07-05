@@ -1,5 +1,7 @@
 # vk-glamping-parser
 
+[![CI](https://github.com/Manimall/vk-glamping-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/Manimall/vk-glamping-parser/actions/workflows/ci.yml)
+
 HTTP-микросервис на Go: собирает карточку глэмпинга для фронтенда iv-iframes.
 По домену VK достаёт фотографии и данные домиков, структурирует описание
 (удобства, цены, доп.услуги, правила) и отдаёт единым JSON-ом — как страница

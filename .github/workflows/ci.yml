@@ -1,0 +1,30 @@
+name: CI
+
+# Гоняем проверки на пуш в main и на каждый PR в main — чтобы в интерфейсе
+# GitHub было видно зелёные галочки «собралось и тесты прошли».
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod # версия берётся из go.mod (сейчас 1.24.4)
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...

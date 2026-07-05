@@ -4,7 +4,10 @@ go 1.24.4
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.52.0
+	github.com/corona10/goimagehash v1.1.0
+	github.com/esimov/pigo v1.4.6
 	github.com/joho/godotenv v1.5.1
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 )
 
 require (

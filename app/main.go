@@ -34,6 +34,8 @@ const (
 	writeTimeout    = 30 * time.Second // поход в VK может быть небыстрым
 	idleTimeout     = 60 * time.Second
 	shutdownTimeout = 10 * time.Second
+	// exportTimeout — общий бюджет CLI-экспорта (скачать все фото + перекодировать).
+	exportTimeout = 5 * time.Minute
 )
 
 // server держит ОБЩИЕ зависимости приложения. Хендлеры — это методы server,
@@ -67,7 +69,7 @@ func main() {
 	}
 
 	if *exportDomain != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), exportTimeout)
 		defer cancel()
 		if err := runExport(ctx, cfg, *exportDomain, *exportOut); err != nil {
 			slog.Error("export failed", "err", err)

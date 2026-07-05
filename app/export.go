@@ -17,13 +17,21 @@ import (
 )
 
 const (
-	// exportPhotoLimit — сколько фото в итоговой галерее.
-	exportPhotoLimit = 15
 	// albumFetchCount — сколько кадров тянем из альбома (с запасом на дедуп).
 	albumFetchCount = 60
 	// wallFetchCount — сколько тянем со стены (фоллбэк), тоже с запасом.
 	wallFetchCount = 40
+	// downloadTimeout — таймаут на скачивание одного фото.
+	downloadTimeout = 20 * time.Second
 )
+
+// exportVK — то, что нужно экспорту от VK-клиента (accept interfaces). *vk.Client
+// удовлетворяет автоматически; в тестах подставляем фейк без сети.
+type exportVK interface {
+	GetMarketItemsByIDs(ctx context.Context, itemIDs []string) ([]vk.MarketItem, error)
+	GetAlbumPhotos(ctx context.Context, ownerID int64, albumID string, count int) ([]string, error)
+	GetPhotos(ctx context.Context, ownerID int64, limit int) ([]string, error)
+}
 
 // runExport собирает готовую галерею photo-1..N.webp для объекта:
 // owner → id альбома дома из описания товара → фото альбома (фоллбэк на стену) →
@@ -48,7 +56,7 @@ func runExport(ctx context.Context, cfg *config.Config, domain, outDir string) e
 	raws := downloadAll(ctx, urls)
 	slog.Info("export: скачано", "ok", len(raws), "из", len(urls))
 
-	n, err := images.Process(ctx, raws, outDir, exportPhotoLimit)
+	n, err := images.Process(ctx, raws, outDir, maxPhotos)
 	if err != nil {
 		return fmt.Errorf("export: process: %w", err)
 	}
@@ -56,42 +64,32 @@ func runExport(ctx context.Context, cfg *config.Config, domain, outDir string) e
 	return nil
 }
 
-// photoURLs выбирает источник: альбом дома (id из описания товара) → фоллбэк
-// на стену. Возвращает URL и метку источника (для лога).
-func photoURLs(ctx context.Context, client *vk.Client, cfg *config.Config, domain string, ownerID int64) ([]string, string) {
-	// id товаров берём из конфига объекта (там же, откуда их берёт хендлер).
-	var itemsRaw string
-	if obj, err := objects.Load(cfg.DataDir, domain); err != nil {
+// photoURLs выбирает источник фото. Тонкая I/O-обёртка: достаёт id товаров из
+// конфига объекта, дальше решение принимает чистый (тестируемый) resolveSource.
+func photoURLs(ctx context.Context, client exportVK, cfg *config.Config, domain string, ownerID int64) ([]string, string) {
+	return resolveSource(ctx, client, configuredItemIDs(cfg, domain, ownerID), ownerID)
+}
+
+// configuredItemIDs возвращает абсолютные id товаров объекта из его конфига
+// (там же, откуда их берёт хендлер). Нет конфига/товаров — пустой список.
+func configuredItemIDs(cfg *config.Config, domain string, ownerID int64) []string {
+	obj, err := objects.Load(cfg.DataDir, domain)
+	if err != nil {
 		slog.Warn("export: object config", "domain", domain, "err", err)
-	} else if obj != nil && len(obj.Items) > 0 {
-		itemsRaw = strings.Join(obj.Items, ",")
+		return nil
 	}
-
-	// Из описаний товаров достаём ссылки на альбомы «ВСЕ ФОТО ДОМА».
-	var refs []images.AlbumRef
-	if ids := marketIDsFromParam(itemsRaw, ownerID); len(ids) > 0 {
-		if items, err := client.GetMarketItemsByIDs(ctx, ids); err != nil {
-			slog.Warn("export: market items", "err", err)
-		} else {
-			for _, it := range items {
-				refs = append(refs, images.AlbumRefsFromDescription(it.Description)...)
-			}
-		}
+	if obj == nil || len(obj.Items) == 0 {
+		return nil
 	}
+	return marketIDsFromParam(strings.Join(obj.Items, ","), ownerID)
+}
 
-	if len(refs) > 0 {
-		var urls []string
-		for _, ref := range refs {
-			albumURLs, err := client.GetAlbumPhotos(ctx, ref.OwnerID, ref.AlbumID, albumFetchCount)
-			if err != nil {
-				slog.Warn("export: album photos", "album", ref.AlbumID, "err", err)
-				continue
-			}
-			urls = append(urls, albumURLs...)
-		}
-		if len(urls) > 0 {
-			return urls, "album"
-		}
+// resolveSource выбирает источник: альбом дома (id альбома из описания товара) →
+// фоллбэк на стену. Возвращает URL и метку источника (для лога). Вся сеть — через
+// интерфейс exportVK, поэтому функция покрыта тестами без обращения к VK.
+func resolveSource(ctx context.Context, client exportVK, itemIDs []string, ownerID int64) ([]string, string) {
+	if urls := albumURLs(ctx, client, itemIDs); len(urls) > 0 {
+		return urls, "album"
 	}
 
 	// Фоллбэк: стена (когда альбома дома нет — напр. страница-пользователь).
@@ -103,9 +101,38 @@ func photoURLs(ctx context.Context, client *vk.Client, cfg *config.Config, domai
 	return urls, "wall"
 }
 
+// albumURLs собирает URL из альбомов «ВСЕ ФОТО ДОМА», ссылки на которые указаны
+// в описаниях товаров. Пусто, если товаров нет или альбомы недоступны.
+func albumURLs(ctx context.Context, client exportVK, itemIDs []string) []string {
+	if len(itemIDs) == 0 {
+		return nil
+	}
+	items, err := client.GetMarketItemsByIDs(ctx, itemIDs)
+	if err != nil {
+		slog.Warn("export: market items", "err", err)
+		return nil
+	}
+
+	var refs []images.AlbumRef
+	for _, it := range items {
+		refs = append(refs, images.AlbumRefsFromDescription(it.Description)...)
+	}
+
+	var urls []string
+	for _, ref := range refs {
+		got, err := client.GetAlbumPhotos(ctx, ref.OwnerID, ref.AlbumID, albumFetchCount)
+		if err != nil {
+			slog.Warn("export: album photos", "album", ref.AlbumID, "err", err)
+			continue
+		}
+		urls = append(urls, got...)
+	}
+	return urls
+}
+
 // downloadAll скачивает картинки по URL. Ошибка одной не роняет остальные.
 func downloadAll(ctx context.Context, urls []string) [][]byte {
-	httpClient := &http.Client{Timeout: 20 * time.Second}
+	httpClient := &http.Client{Timeout: downloadTimeout}
 	out := make([][]byte, 0, len(urls))
 	for _, u := range urls {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -115,6 +142,11 @@ func downloadAll(ctx context.Context, urls []string) [][]byte {
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			slog.Warn("export: download", "err", err)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			slog.Warn("export: download status", "url", u, "status", resp.StatusCode)
+			resp.Body.Close()
 			continue
 		}
 		data, err := io.ReadAll(resp.Body)

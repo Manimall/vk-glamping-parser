@@ -27,11 +27,18 @@ func init() {
 	faceClassifier = c
 }
 
-// Порог качества детекции лица (pigo). Выше — меньше ложных срабатываний.
-const faceQualityThreshold = 6.0
-
-// analysisWidth — до какой ширины уменьшаем кадр перед анализом (скорость).
-const analysisWidth = 480
+const (
+	// faceQualityThreshold — порог качества детекции лица (pigo). Выше — меньше
+	// ложных срабатываний.
+	faceQualityThreshold = 6.0
+	// analysisWidth — до какой ширины уменьшаем кадр перед анализом (скорость).
+	analysisWidth = 480
+	// Параметры каскада pigo (рекомендованные значения из документации pigo).
+	faceMinSize     = 40  // мин. сторона лица в пикселях уменьшенного кадра
+	faceShiftFactor = 0.1 // шаг скользящего окна (доля размера окна)
+	faceScaleFactor = 1.1 // во сколько раз растёт окно между проходами
+	faceClusterIoU  = 0.2 // порог слияния пересекающихся детекций
+)
 
 // Hash считает перцептивный хэш кадра (для дедупа похожих).
 func Hash(img image.Image) (*goimagehash.ImageHash, error) {
@@ -48,15 +55,15 @@ func HasFace(img image.Image) bool {
 	cols, rows := nrgba.Bounds().Dx(), nrgba.Bounds().Dy()
 
 	params := pigo.CascadeParams{
-		MinSize:     40,
+		MinSize:     faceMinSize,
 		MaxSize:     cols, // лицо может занимать почти весь кадр
-		ShiftFactor: 0.1,
-		ScaleFactor: 1.1,
+		ShiftFactor: faceShiftFactor,
+		ScaleFactor: faceScaleFactor,
 		ImageParams: pigo.ImageParams{Pixels: gray, Rows: rows, Cols: cols, Dim: cols},
 	}
 
 	dets := faceClassifier.RunCascade(params, 0.0)
-	dets = faceClassifier.ClusterDetections(dets, 0.2)
+	dets = faceClassifier.ClusterDetections(dets, faceClusterIoU)
 	for _, d := range dets {
 		if d.Q > faceQualityThreshold {
 			return true
@@ -65,8 +72,15 @@ func HasFace(img image.Image) bool {
 	return false
 }
 
-// scoreWidth — до какой ширины уменьшаем кадр для оценки «уличности» (скорость).
-const scoreWidth = 160
+const (
+	// scoreWidth — до какой ширины уменьшаем кадр для оценки «уличности».
+	scoreWidth = 160
+	// Цветовые пороги «уличности» (0..255 на канал).
+	greenMinLevel    = 60  // насколько ярким должен быть зелёный у листвы
+	channelDominance = 10  // на сколько доминирующий канал превышает другие
+	skyBlueMinLevel  = 120 // насколько ярким должен быть синий у неба
+	skyGreenSlack    = 20  // допуск: синее небо может быть чуть зеленее (b8>=g8-slack)
+)
 
 // OutdoorScore — грубая эвристика «обзорность/экстерьер»: доля пикселей похожих
 // на листву (зелёный) или небо (яркий синий). У экстерьеров с природой она
@@ -84,9 +98,9 @@ func OutdoorScore(img image.Image) float64 {
 			r8, g8, b8 := int(r>>8), int(g>>8), int(bl>>8)
 			total++
 			switch {
-			case g8 > 60 && g8 > r8+10 && g8 > b8+10: // листва
+			case g8 > greenMinLevel && g8 > r8+channelDominance && g8 > b8+channelDominance: // листва
 				outdoor++
-			case b8 > 120 && b8 > r8+10 && b8 >= g8-20: // синее небо
+			case b8 > skyBlueMinLevel && b8 > r8+channelDominance && b8 >= g8-skyGreenSlack: // синее небо
 				outdoor++
 			}
 		}

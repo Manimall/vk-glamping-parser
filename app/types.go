@@ -30,15 +30,15 @@ type Cabin struct {
 // GlampingData — карточка глэмпинга: ОБЪЕКТ-уровень (название, локация, галерея)
 // + список домиков. omitempty убирает поля, которых нет.
 type GlampingData struct {
-	Title    string   `json:"title,omitempty"`    // название глэмпинга (из группы)
-	About    string   `json:"about,omitempty"`    // описание сообщества
-	Location string   `json:"location,omitempty"` // адрес/город
-	Coords   *Coords  `json:"coords,omitempty"`   // координаты (если заданы)
-	MapURL   string   `json:"mapUrl,omitempty"`   // ссылка на карту (если задана)
-	Contact  string   `json:"contact,omitempty"`  // телефон
-	Photos   []string          `json:"photos"`           // общая галерея
-	Cabins   []Cabin           `json:"cabins"`           // домики с удобствами
-	Extras   []extract.Extra   `json:"extras,omitempty"` // доп.услуги объекта (товары-услуги VK)
+	Title    string          `json:"title,omitempty"`    // название глэмпинга (из группы)
+	About    string          `json:"about,omitempty"`    // описание сообщества
+	Location string          `json:"location,omitempty"` // адрес/город
+	Coords   *Coords         `json:"coords,omitempty"`   // координаты (если заданы)
+	MapURL   string          `json:"mapUrl,omitempty"`   // ссылка на карту (если задана)
+	Contact  string          `json:"contact,omitempty"`  // телефон
+	Photos   []string        `json:"photos"`             // общая галерея
+	Cabins   []Cabin         `json:"cabins"`             // домики с удобствами
+	Extras   []extract.Extra `json:"extras,omitempty"`   // доп.услуги объекта (товары-услуги VK)
 }
 
 // glampingQuery — разобранные параметры запроса. Объект-параметр вместо длинного

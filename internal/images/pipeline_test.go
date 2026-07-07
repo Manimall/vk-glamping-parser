@@ -48,6 +48,28 @@ func TestDedup(t *testing.T) {
 	}
 }
 
+func TestSplitCoverGallery(t *testing.T) {
+	photos := []photo{
+		{hasFace: false, outdoor: 0.5, w: 720, h: 1280}, // портрет
+		{hasFace: false, outdoor: 0.6, w: 1280, h: 720}, // ландшафт — лучшая обложка
+		{hasFace: true, outdoor: 0.9, w: 1280, h: 720},  // с лицом — не обложка
+		{hasFace: false, outdoor: 0.4, w: 720, h: 1280}, // портрет
+	}
+	cover, gallery := splitCoverGallery(photos, 10)
+
+	if cover == nil || cover.w != 1280 || cover.hasFace {
+		t.Fatalf("обложка — ландшафтный экстерьер без лица, получил %+v", cover)
+	}
+	if len(gallery) != 3 {
+		t.Fatalf("галерея = все кроме обложки (3), получил %d", len(gallery))
+	}
+	for _, g := range gallery {
+		if !g.hasFace && g.w == 1280 && g.outdoor == 0.6 {
+			t.Errorf("обложка не должна попадать в галерею")
+		}
+	}
+}
+
 func TestOrder(t *testing.T) {
 	in := []photo{
 		{hasFace: true, outdoor: 0.9},  // с лицом → в конец, несмотря на высокий score

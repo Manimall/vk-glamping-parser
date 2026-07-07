@@ -48,17 +48,21 @@ func TestDedup(t *testing.T) {
 	}
 }
 
-func TestSplitCoverGallery(t *testing.T) {
+func TestHeuristicCoverAndSplit(t *testing.T) {
 	photos := []photo{
 		{hasFace: false, outdoor: 0.5, w: 720, h: 1280}, // портрет
-		{hasFace: false, outdoor: 0.6, w: 1280, h: 720}, // ландшафт — лучшая обложка
+		{hasFace: false, outdoor: 0.6, w: 1280, h: 720}, // ландшафт, sweet outdoor — обложка
 		{hasFace: true, outdoor: 0.9, w: 1280, h: 720},  // с лицом — не обложка
 		{hasFace: false, outdoor: 0.4, w: 720, h: 1280}, // портрет
 	}
-	cover, gallery := splitCoverGallery(photos, 10)
+	ci := heuristicCoverIdx(photos)
+	if ci != 1 {
+		t.Fatalf("обложка — index 1 (ландшафт без лица, sweet outdoor), получил %d", ci)
+	}
 
+	cover, gallery := splitAt(photos, ci, 10)
 	if cover == nil || cover.w != 1280 || cover.hasFace {
-		t.Fatalf("обложка — ландшафтный экстерьер без лица, получил %+v", cover)
+		t.Fatalf("обложка — экстерьер без лица, получил %+v", cover)
 	}
 	if len(gallery) != 3 {
 		t.Fatalf("галерея = все кроме обложки (3), получил %d", len(gallery))

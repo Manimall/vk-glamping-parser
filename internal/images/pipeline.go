@@ -38,7 +38,15 @@ type photo struct {
 // Обложку ИСКЛЮЧАЕМ из галереи (issue #6: желательно, чтобы обложки не было
 // среди фото карусели). Возвращает число записанных фото галереи. Ошибка одного
 // кадра не роняет остальные (graceful, лог WARN).
-func Process(ctx context.Context, raws [][]byte, outDir string, limit int) (int, error) {
+// CoverPicker — опциональный внешний выбор обложки (напр. локальная vision-
+// модель). Возвращает индекс лучшего кадра среди кандидатов и ok; ok=false →
+// берём эвристику. Интерфейс (а не прямой импорт vision) — чтобы images не
+// зависел от сети (Dependency Inversion).
+type CoverPicker interface {
+	PickCover(ctx context.Context, candidates [][]byte) (int, bool)
+}
+
+func Process(ctx context.Context, raws [][]byte, outDir string, limit int, picker CoverPicker) (int, error) {
 	photos := make([]photo, 0, len(raws))
 	for i, data := range raws {
 		img, _, err := image.Decode(bytes.NewReader(data))
@@ -64,7 +72,8 @@ func Process(ctx context.Context, raws [][]byte, outDir string, limit int) (int,
 
 	photos = dedup(photos)
 	photos = order(photos)
-	cover, gallery := splitCoverGallery(photos, limit)
+	ci := coverIndex(ctx, photos, picker)
+	cover, gallery := splitAt(photos, ci, limit)
 
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return 0, fmt.Errorf("images: mkdir %s: %w", outDir, err)
@@ -73,11 +82,8 @@ func Process(ctx context.Context, raws [][]byte, outDir string, limit int) (int,
 		return 0, err
 	}
 
-	// Обложка — лучший кадр (экстерьер без людей), кропнутый под 3:2. Он же
-	// исключён из галереи (см. splitCoverGallery).
+	// Обложка — выбранный кадр, кропнутый под 3:2. Он же исключён из галереи.
 	if cover != nil {
-		slog.Info("images: обложка выбрана",
-			"outdoor", cover.outdoor, "w", cover.w, "h", cover.h, "score", coverScore(*cover))
 		dst := filepath.Join(outDir, "cover.webp")
 		if err := encodeCover(ctx, cover.data, dst); err != nil {
 			slog.Warn("images: cover encode skipped", "err", err)
@@ -127,13 +133,29 @@ func coverScore(p photo) float64 {
 	return outdoorFit * (0.85 + 0.15*fit)
 }
 
-// splitCoverGallery выбирает обложку и галерею. Обложка — кадр без лица с
-// максимальным coverScore (уличный и хорошо ложится в 3:2). Его ИСКЛЮЧАЕМ из
-// галереи (issue #6). Галерея — остальные в исходном порядке, не более limit.
-func splitCoverGallery(photos []photo, limit int) (*photo, []photo) {
-	if len(photos) == 0 {
-		return nil, nil
+// coverIndex — индекс кадра-обложки. Сначала пробуем внешний picker (vision-
+// модель): кандидаты — кадры без лиц (люди на обложке не нужны), маппим индекс
+// обратно. Если picker недоступен/не дал результата — эвристика heuristicCoverIdx.
+func coverIndex(ctx context.Context, photos []photo, picker CoverPicker) int {
+	if picker != nil {
+		idxs := make([]int, 0, len(photos))
+		cand := make([][]byte, 0, len(photos))
+		for i, p := range photos {
+			if !p.hasFace {
+				idxs = append(idxs, i)
+				cand = append(cand, p.data)
+			}
+		}
+		if vi, ok := picker.PickCover(ctx, cand); ok && vi >= 0 && vi < len(idxs) {
+			slog.Info("images: обложка выбрана vision-моделью", "idx", idxs[vi])
+			return idxs[vi]
+		}
 	}
+	return heuristicCoverIdx(photos)
+}
+
+// heuristicCoverIdx — индекс кадра без лица с максимальным coverScore.
+func heuristicCoverIdx(photos []photo) int {
 	best, bestScore := 0, -1.0
 	for i, p := range photos {
 		if p.hasFace {
@@ -143,10 +165,22 @@ func splitCoverGallery(photos []photo, limit int) (*photo, []photo) {
 			best, bestScore = i, s
 		}
 	}
-	cover := &photos[best]
+	return best
+}
+
+// splitAt делит кадры на обложку (photos[coverIdx]) и галерею (остальные в
+// исходном порядке, не более limit). Обложку в галерею НЕ включаем (issue #6).
+func splitAt(photos []photo, coverIdx, limit int) (*photo, []photo) {
+	if len(photos) == 0 {
+		return nil, nil
+	}
+	if coverIdx < 0 || coverIdx >= len(photos) {
+		coverIdx = 0
+	}
+	cover := &photos[coverIdx]
 	gallery := make([]photo, 0, len(photos)-1)
-	gallery = append(gallery, photos[:best]...)
-	gallery = append(gallery, photos[best+1:]...)
+	gallery = append(gallery, photos[:coverIdx]...)
+	gallery = append(gallery, photos[coverIdx+1:]...)
 	if limit > 0 && len(gallery) > limit {
 		gallery = gallery[:limit]
 	}

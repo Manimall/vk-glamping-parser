@@ -143,6 +143,24 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 	raw = append(raw, manual...)
 
 	data.Cabins = s.structureCabins(ctx, raw, data.Location, len(photos))
+
+	// Товары-услуги (фурако, наполнение…) — отдельные VK-товары, НЕ домики. Берём
+	// их как доп.услуги объекта: название + цена (структурировать нечего).
+	if cfg != nil && len(cfg.Extras) > 0 {
+		if ids := marketIDsFromParam(strings.Join(cfg.Extras, ","), ownerID); len(ids) > 0 {
+			if items, err := s.client.GetMarketItemsByIDs(ctx, ids); err != nil {
+				slog.Warn("extra items skipped", "ids", ids, "err", err)
+			} else {
+				for _, item := range items {
+					data.Extras = append(data.Extras, extract.Extra{
+						Name:  item.Title,
+						Price: item.Price.Text,
+					})
+				}
+			}
+		}
+	}
+
 	return data, nil
 }
 

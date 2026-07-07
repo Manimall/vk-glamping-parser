@@ -36,8 +36,9 @@ type GlampingData struct {
 	Coords   *Coords  `json:"coords,omitempty"`   // координаты (если заданы)
 	MapURL   string   `json:"mapUrl,omitempty"`   // ссылка на карту (если задана)
 	Contact  string   `json:"contact,omitempty"`  // телефон
-	Photos   []string `json:"photos"`             // общая галерея
-	Cabins   []Cabin  `json:"cabins"`             // домики с удобствами
+	Photos   []string          `json:"photos"`           // общая галерея
+	Cabins   []Cabin           `json:"cabins"`           // домики с удобствами
+	Extras   []extract.Extra   `json:"extras,omitempty"` // доп.услуги объекта (товары-услуги VK)
 }
 
 // glampingQuery — разобранные параметры запроса. Объект-параметр вместо длинного

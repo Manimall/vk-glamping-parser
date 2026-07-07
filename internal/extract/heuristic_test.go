@@ -87,6 +87,31 @@ func TestMicrowaveNotHeating(t *testing.T) {
 	}
 }
 
+// TestHeuristicNewAmenities — правила словаря, добавленные под AFRAME: кресло-
+// гамак, очиститель воздуха, фильтр воды, кофемашина, гигиена по мылу/гелю.
+func TestHeuristicNewAmenities(t *testing.T) {
+	listing := Listing{
+		Description: "Кресло-гамак. Очиститель воздуха (бактерицидный). " +
+			"Фильтр для очистки воды. Капсульная кофемашина. " +
+			"Жидкое мыло, гель для душа.",
+	}
+	prop, err := NewHeuristic().Extract(context.Background(), listing)
+	if err != nil {
+		t.Fatalf("Extract вернул ошибку: %v", err)
+	}
+	for _, label := range []string{
+		"Кресло-гамак",
+		"Очиститель воздуха",
+		"Фильтр для воды",
+		"Кофемашина",
+		"Средства гигиены",
+	} {
+		if !hasAmenity(prop, label) {
+			t.Errorf("ожидал удобство %q, его нет в %+v", label, prop.AmenityGroups)
+		}
+	}
+}
+
 func hasFact(p *Property, label, value string) bool {
 	for _, f := range p.Facts {
 		if f.Label == label && f.Value == value {

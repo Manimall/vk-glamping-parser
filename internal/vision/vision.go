@@ -27,6 +27,10 @@ const (
 	// maxCandidates — сколько кадров максимум прогоняем через модель (бюджет
 	// времени: ~1–3 c на кадр). Кандидатов пред-фильтрует эвристика.
 	maxCandidates = 8
+	// Веса скоринга описания. Негатив тяжелее позитива: один «person»/«interior»
+	// должен перевесить одиночный «house» (кадр с людьми в обложку не годится).
+	positiveWeight = 2
+	negativeWeight = 3
 )
 
 // positiveKW — слова «виден фасад/домик снаружи» (плюс к скору).
@@ -153,12 +157,12 @@ func coverTextScore(desc string) int {
 	score := 0
 	for _, kw := range positiveKW {
 		if strings.Contains(d, kw) {
-			score += 2
+			score += positiveWeight
 		}
 	}
 	for _, kw := range negativeKW {
 		if strings.Contains(d, kw) {
-			score -= 3
+			score -= negativeWeight
 		}
 	}
 	return score

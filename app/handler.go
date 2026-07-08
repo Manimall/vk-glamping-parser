@@ -150,6 +150,18 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 		}
 	}
 
+	// SEO/OG-тексты из контента (короткое имя домика, локация, «питч» из описания).
+	// Презентует место, а не перечисляет удобства. Бренд сайта сюда не входит —
+	// его добавит фронт (разделение контент × презентация).
+	if len(data.Cabins) > 0 {
+		seo := extract.BuildSEO(extract.SEOInput{
+			Name:     data.Cabins[0].Title,
+			Location: data.Location,
+			About:    data.About,
+		})
+		data.Seo = &seo
+	}
+
 	return data, nil
 }
 

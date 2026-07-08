@@ -20,6 +20,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"vk-parser/internal/config"
 	"vk-parser/internal/images"
 	"vk-parser/internal/objects"
+	"vk-parser/internal/vision"
 	"vk-parser/internal/vk"
 )
 
@@ -82,9 +84,20 @@ func runExport(ctx context.Context, cfg *config.Config, domain, outDir string) e
 	raws := downloadAll(ctx, urls)
 	slog.Info("export: скачано", "ok", len(raws), "из", len(urls))
 
+	// Опциональный выбор обложки локальной vision-моделью (Ollama). Бесплатно,
+	// без подписок; если сервис не поднят — picker=nil и images берёт эвристику.
+	// Выключить принудительно: COVER_VISION=off.
+	var picker images.CoverPicker
+	if os.Getenv("COVER_VISION") != "off" {
+		if vc := vision.New(os.Getenv("OLLAMA_URL"), ""); vc.Available(ctx) {
+			picker = vc
+			slog.Info("export: обложку выбирает vision-модель (Ollama)")
+		}
+	}
+
 	// Шаг 4. Вся тяжёлая логика с картинками спрятана за одним вызовом пакета
 	// images — runExport про неё ничего не знает (разделение ответственности).
-	n, err := images.Process(ctx, raws, outDir, maxPhotos)
+	n, err := images.Process(ctx, raws, outDir, maxPhotos, picker)
 	if err != nil {
 		return fmt.Errorf("export: process: %w", err)
 	}
@@ -139,9 +152,9 @@ func resolveSource(ctx context.Context, client exportVK, itemIDs []string, owner
 }
 
 // albumURLs идёт к фото альбома дома в ДВА прохода:
-//  1) по id товаров тянем сами товары и из текста их описаний вытаскиваем ссылки
+//  1. по id товаров тянем сами товары и из текста их описаний вытаскиваем ссылки
 //     на альбомы («ВСЕ ФОТО ДОМА: vk.com/album-<owner>_<album>» → []AlbumRef);
-//  2) по каждому AlbumRef запрашиваем фото и складываем в один общий список.
+//  2. по каждому AlbumRef запрашиваем фото и складываем в один общий список.
 //
 // Пусто (nil), если товаров нет, товары не загрузились или альбомы недоступны —
 // тогда resolveSource уйдёт в фоллбэк на стену. Ошибка одного альбома не роняет

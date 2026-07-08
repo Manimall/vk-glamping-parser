@@ -25,6 +25,7 @@ type Object struct {
 	Coords  string   `json:"coords"`  // "lat,lon"
 	Map     string   `json:"map"`     // ссылка на карту
 	Items   []string `json:"items"`   // товары-домики VK (URL/id)
+	Extras  []string `json:"extras"`  // товары-услуги VK (фурако, наполнение…): доп.услуги, не домики
 	Cabins  []Cabin  `json:"cabins"`  // ручные домики (не из VK)
 }
 

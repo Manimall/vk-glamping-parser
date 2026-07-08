@@ -9,6 +9,7 @@ import (
 
 	"vk-parser/internal/extract"
 	"vk-parser/internal/objects"
+	"vk-parser/internal/vk"
 )
 
 // handleGlamping — МЕТОД server. Сигнатура — ровно http.HandlerFunc (w, r), без
@@ -127,23 +128,45 @@ func (s *server) buildGlampingData(ctx context.Context, q glampingQuery) (Glampi
 	// «Сырые» домики из двух источников: товары VK (по прямым id) и ручные
 	// домики из конфига (например, описание с Avito, который ботами не парсится).
 	raw := make([]objects.Cabin, 0)
-	if ids := marketIDsFromParam(itemsRaw, ownerID); len(ids) > 0 {
-		if items, err := s.client.GetMarketItemsByIDs(ctx, ids); err != nil {
-			slog.Warn("market items skipped", "ids", ids, "err", err)
-		} else {
-			for _, item := range items {
-				raw = append(raw, objects.Cabin{
-					Title:       item.Title,
-					Price:       item.Price.Text,
-					Description: item.Description,
-				})
-			}
-		}
+	for _, item := range s.fetchMarketItems(ctx, itemsRaw, ownerID, "market items") {
+		raw = append(raw, objects.Cabin{
+			Title:       item.Title,
+			Price:       item.Price.Text,
+			Description: item.Description,
+		})
 	}
 	raw = append(raw, manual...)
 
 	data.Cabins = s.structureCabins(ctx, raw, data.Location, len(photos))
+
+	// Товары-услуги (фурако, наполнение…) — отдельные VK-товары, НЕ домики. Берём
+	// их как доп.услуги объекта: название + цена (структурировать нечего).
+	if cfg != nil {
+		for _, item := range s.fetchMarketItems(ctx, strings.Join(cfg.Extras, ","), ownerID, "extra items") {
+			data.Extras = append(data.Extras, extract.Extra{
+				Name:  item.Title,
+				Price: item.Price.Text,
+			})
+		}
+	}
+
 	return data, nil
+}
+
+// fetchMarketItems тянет товары VK по строке id/URL (через запятую). Пусто или
+// ошибка → nil (graceful, WARN с меткой what). Общий шаг для домиков и услуг —
+// чтобы не дублировать связку marketIDsFromParam → GetMarketItemsByIDs → лог.
+func (s *server) fetchMarketItems(ctx context.Context, param string, ownerID int64, what string) []vk.MarketItem {
+	ids := marketIDsFromParam(param, ownerID)
+	if len(ids) == 0 {
+		return nil
+	}
+	items, err := s.client.GetMarketItemsByIDs(ctx, ids)
+	if err != nil {
+		slog.Warn(what+" skipped", "ids", ids, "err", err)
+		return nil
+	}
+	return items
 }
 
 // structureCabins прогоняет каждый «сырой» домик через извлекатель (что в нём

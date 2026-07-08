@@ -33,10 +33,12 @@ func TestHeuristicExtract(t *testing.T) {
 
 	// Ожидаемые удобства, которые словарь должен распознать.
 	for _, label := range []string{
-		"Кухня (оборудованная)",
+		"Холодильник",
+		"Микроволновка",
+		"Посуда и кухонная утварь",
 		"Ванная, полотенца, халаты",
 		"ТВ / проектор",
-		"Умная колонка (Алиса)",
+		"Колонка",
 		"Мангальная зона",
 		"Фурако / банный чан",
 	} {
@@ -84,6 +86,31 @@ func TestMicrowaveNotHeating(t *testing.T) {
 	prop, _ := NewHeuristic().Extract(context.Background(), listing)
 	if hasAmenity(prop, "Отопление") {
 		t.Errorf("микроволновка ошибочно распознана как отопление: %+v", prop.AmenityGroups)
+	}
+}
+
+// TestHeuristicNewAmenities — правила словаря, добавленные под AFRAME: кресло-
+// гамак, очиститель воздуха, фильтр воды, кофемашина, гигиена по мылу/гелю.
+func TestHeuristicNewAmenities(t *testing.T) {
+	listing := Listing{
+		Description: "Кресло-гамак. Очиститель воздуха (бактерицидный). " +
+			"Фильтр для очистки воды. Капсульная кофемашина. " +
+			"Жидкое мыло, гель для душа.",
+	}
+	prop, err := NewHeuristic().Extract(context.Background(), listing)
+	if err != nil {
+		t.Fatalf("Extract вернул ошибку: %v", err)
+	}
+	for _, label := range []string{
+		"Кресло-гамак",
+		"Очиститель воздуха",
+		"Фильтр для воды",
+		"Кофемашина",
+		"Средства гигиены",
+	} {
+		if !hasAmenity(prop, label) {
+			t.Errorf("ожидал удобство %q, его нет в %+v", label, prop.AmenityGroups)
+		}
 	}
 }
 

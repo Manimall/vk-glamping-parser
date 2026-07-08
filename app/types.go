@@ -39,6 +39,7 @@ type GlampingData struct {
 	Photos   []string        `json:"photos"`             // общая галерея
 	Cabins   []Cabin         `json:"cabins"`             // домики с удобствами
 	Extras   []extract.Extra `json:"extras,omitempty"`   // доп.услуги объекта (товары-услуги VK)
+	Seo      *extract.SEO    `json:"seo,omitempty"`      // SEO/OG-тексты из контента (без бренда фронта)
 }
 
 // glampingQuery — разобранные параметры запроса. Объект-параметр вместо длинного

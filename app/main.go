@@ -59,12 +59,29 @@ func main() {
 	// Флаги. Если задан -export <domain> — собираем галерею фото объекта и выходим
 	// (CLI-режим экспорта), иначе поднимаем HTTP-сервер.
 	exportDomain := flag.String("export", "", "домен объекта: собрать photo-N.webp и выйти (вместо сервера)")
-	exportOut := flag.String("out", "", "каталог для экспортированных фото (по умолчанию export/<domain>)")
+	exportOut := flag.String("out", "", "каталог вывода (-export фото / --provider JSON)")
+	providerName := flag.String("provider", "", "пакетный сбор источника: glamping → generated/<name>/objects.json")
 	flag.Parse()
 
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("startup failed", "err", err)
+		os.Exit(1)
+	}
+
+	// Режим провайдера: пакетный сбор источника в generated/ и выход. VK-токен
+	// здесь не требуется (провайдер glamping ходит на свой сайт).
+	if *providerName != "" {
+		if err := runProvider(*providerName, *exportOut); err != nil {
+			slog.Error("provider failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Дальше — VK-режимы (сервер / -export): им нужен токен.
+	if cfg.VKToken == "" {
+		slog.Error("startup failed", "err", "VK_TOKEN is not set")
 		os.Exit(1)
 	}
 

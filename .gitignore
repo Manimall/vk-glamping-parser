@@ -40,3 +40,6 @@ go.work.sum
 .DS_Store
 .idea/
 .vscode/
+
+# Пакетный вывод провайдеров (регенерируется)
+generated/

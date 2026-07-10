@@ -2,7 +2,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -38,15 +37,12 @@ func Load() (*Config, error) {
 	// приходят прямо из окружения (Docker/CI), и это нормальный сценарий.
 	_ = godotenv.Load()
 
-	token := os.Getenv("VK_TOKEN")
-	if token == "" {
-		return nil, fmt.Errorf("config: VK_TOKEN is not set")
-	}
-
-	// ANTHROPIC_API_KEY читаем БЕЗ проверки на пустоту: фича опциональна.
-	// Решение «включать ли извлечение» принимает вызывающий, посмотрев на поле.
+	// VK_TOKEN и ANTHROPIC_API_KEY читаем БЕЗ проверки на пустоту: обязательность
+	// зависит от режима. VK_TOKEN нужен только VK-путям (HTTP-сервер, -export,
+	// провайдер vk); провайдеру glamping он не нужен. Проверку делает вызывающий
+	// (main) там, где токен реально используется.
 	return &Config{
-		VKToken:      token,
+		VKToken:      os.Getenv("VK_TOKEN"),
 		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY"),
 		ServerAddr:   envOr("SERVER_ADDR", ":8080"),
 		DataDir:      envOr("DATA_DIR", "data"),

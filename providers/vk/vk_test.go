@@ -1,11 +1,9 @@
-package main
+package vkprovider
 
 import (
 	"context"
 	"testing"
-	"time"
 
-	"vk-parser/internal/cache"
 	"vk-parser/internal/extract"
 	"vk-parser/internal/vk"
 )
@@ -44,18 +42,12 @@ func (f *fakeGeocoder) Geocode(_ context.Context, _ string) (lat, lon float64, e
 	return f.lat, f.lon, f.err
 }
 
-// newTestServer собирает server на фейках + реальной (офлайн) эвристике.
-func newTestServer(fvk *fakeVK, fgeo *fakeGeocoder) *server {
-	return &server{
-		client:    fvk,
-		store:     cache.New[GlampingData](time.Minute),
-		extractor: extract.NewHeuristic(),
-		geocoder:  fgeo,
-		dataDir:   "testdata",
-	}
+// newTestParser собирает Parser на фейках + реальной (офлайн) эвристике.
+func newTestParser(fvk *fakeVK, fgeo *fakeGeocoder) *Parser {
+	return New(fvk, extract.NewHeuristic(), fgeo, "testdata")
 }
 
-// --- Тесты buildGlampingData -------------------------------------------------
+// --- Тесты Build (перенесены из app/handler_test.go без изменения поведения) --
 
 // Домики из VK-товаров (как elkidom): передан items, конфига нет.
 func TestBuildFromItems(t *testing.T) {
@@ -68,12 +60,9 @@ func TestBuildFromItems(t *testing.T) {
 		},
 	}
 	fgeo := &fakeGeocoder{}
-	srv := newTestServer(fvk, fgeo)
+	p := newTestParser(fvk, fgeo)
 
-	data, err := srv.buildGlampingData(context.Background(), glampingQuery{
-		domain: "noconfig", // нет testdata/noconfig.json
-		items:  "6377368",
-	})
+	data, err := p.Build(context.Background(), Query{Domain: "noconfig", Items: "6377368"})
 	if err != nil {
 		t.Fatalf("ошибка: %v", err)
 	}
@@ -91,15 +80,11 @@ func TestBuildFromItems(t *testing.T) {
 // Домик из конфига с Avito-описанием (как scandi): группа недоступна (VK-юзер),
 // координаты и адрес — из конфига, геокодер не нужен.
 func TestBuildFromConfig(t *testing.T) {
-	fvk := &fakeVK{
-		ownerID:  883778506,
-		photos:   []string{"p1"},
-		groupErr: errFake, // имитируем ошибку groups.getById для страницы-юзера
-	}
+	fvk := &fakeVK{ownerID: 883778506, photos: []string{"p1"}, groupErr: errFake}
 	fgeo := &fakeGeocoder{}
-	srv := newTestServer(fvk, fgeo)
+	p := newTestParser(fvk, fgeo)
 
-	data, err := srv.buildGlampingData(context.Background(), glampingQuery{domain: "cfg_coords"})
+	data, err := p.Build(context.Background(), Query{Domain: "cfg_coords"})
 	if err != nil {
 		t.Fatalf("ошибка: %v", err)
 	}
@@ -124,9 +109,9 @@ func TestBuildFromConfig(t *testing.T) {
 func TestGeocoderFallback(t *testing.T) {
 	fvk := &fakeVK{ownerID: 1, groupErr: errFake}
 	fgeo := &fakeGeocoder{lat: 56.99, lon: 40.98}
-	srv := newTestServer(fvk, fgeo)
+	p := newTestParser(fvk, fgeo)
 
-	data, err := srv.buildGlampingData(context.Background(), glampingQuery{domain: "cfg_nocoords"})
+	data, err := p.Build(context.Background(), Query{Domain: "cfg_nocoords"})
 	if err != nil {
 		t.Fatalf("ошибка: %v", err)
 	}
@@ -141,10 +126,10 @@ func TestGeocoderFallback(t *testing.T) {
 // Ручные координаты приоритетнее геокодера: при наличии координат в сеть не идём.
 func TestManualCoordsBeatGeocoder(t *testing.T) {
 	fvk := &fakeVK{ownerID: 1, groupErr: errFake}
-	fgeo := &fakeGeocoder{lat: 99, lon: 99} // не должен быть использован
-	srv := newTestServer(fvk, fgeo)
+	fgeo := &fakeGeocoder{lat: 99, lon: 99}
+	p := newTestParser(fvk, fgeo)
 
-	data, err := srv.buildGlampingData(context.Background(), glampingQuery{domain: "cfg_coords"})
+	data, err := p.Build(context.Background(), Query{Domain: "cfg_coords"})
 	if err != nil {
 		t.Fatalf("ошибка: %v", err)
 	}

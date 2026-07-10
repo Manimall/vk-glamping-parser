@@ -13,9 +13,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"vk-parser/internal/config"
 	"vk-parser/internal/contract"
+	"vk-parser/internal/extract"
+	"vk-parser/internal/geocode"
+	"vk-parser/internal/vk"
 	"vk-parser/providers"
 	"vk-parser/providers/glamping_rf"
+	vkprovider "vk-parser/providers/vk"
 )
 
 // providerTimeout — общий бюджет пакетного сбора (сеть + пагинация с задержками).
@@ -23,19 +28,32 @@ const providerTimeout = 10 * time.Minute
 
 // selectProvider — фабрика: имя из CLI → конкретная реализация Provider. Здесь
 // (и только здесь) main знает про конкретные пакеты; дальше — работа через интерфейс.
-func selectProvider(name string) (providers.Provider, error) {
+func selectProvider(name string, cfg *config.Config) (providers.Provider, error) {
 	switch name {
 	case "glamping", "glamping_rf":
 		return glamping_rf.New(), nil
+	case "vk":
+		return vkprovider.New(vk.NewClient(cfg.VKToken), chooseExtractor(cfg), geocode.New(), cfg.DataDir), nil
 	default:
-		return nil, fmt.Errorf("неизвестный провайдер %q (доступно: glamping)", name)
+		return nil, fmt.Errorf("неизвестный провайдер %q (доступно: vk, glamping)", name)
 	}
+}
+
+// chooseExtractor выбирает движок структурирования: LLM при заданном ключе, иначе
+// бесплатная эвристика. Единый выбор для HTTP-сервера и провайдера vk (DRY).
+func chooseExtractor(cfg *config.Config) extract.Extractor {
+	if cfg.AnthropicKey != "" {
+		slog.Info("извлечение: LLM (ANTHROPIC_API_KEY задан)")
+		return extract.NewLLM(cfg.AnthropicKey)
+	}
+	slog.Info("извлечение: эвристика (бесплатно, без ключа)")
+	return extract.NewHeuristic()
 }
 
 // runProvider запускает сбор выбранным провайдером и пишет результат в
 // generated/<provider>/objects.json (или в outDir, если задан -out).
-func runProvider(name, outDir string) error {
-	p, err := selectProvider(name)
+func runProvider(cfg *config.Config, name, outDir string) error {
+	p, err := selectProvider(name, cfg)
 	if err != nil {
 		return err
 	}

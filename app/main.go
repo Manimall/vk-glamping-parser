@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"vk-parser/internal/cache"
+	"vk-parser/internal/catalog"
 	"vk-parser/internal/config"
 	"vk-parser/internal/geocode"
 	"vk-parser/internal/vk"
@@ -98,17 +99,22 @@ func main() {
 		store:  cache.New[GlampingData](cacheTTL),
 	}
 
-	// Роутер. srv.handleGlamping — это «method value»: метод, привязанный к srv,
-	// который сам по себе реализует http.HandlerFunc. Фабрика-замыкание больше
-	// не нужна — зависимости уже внутри srv.
+	// Каталожный API v1: репозиторий над generated/ (пакетная выдача провайдеров).
+	api := &catalogAPI{repo: catalog.New(cfg.GeneratedDir)}
+
+	// Роутер. Хендлеры — «method value»: методы, привязанные к srv/api, сами по
+	// себе реализуют http.HandlerFunc — зависимости уже внутри ресиверов.
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/glamping", srv.handleGlamping)
+	mux.HandleFunc("GET /api/glamping", srv.handleGlamping) // live-сбор VK (как раньше)
+	mux.HandleFunc("GET /api/v1/glampings", api.handleList)
+	mux.HandleFunc("GET /api/v1/glampings/{slug}", api.handleGet)
 
 	// Транспорт (http.Server) — отдельная сущность от нашего server. Свой сервер
 	// с таймаутами (НЕ http.ListenAndServe без настроек — он без таймаутов).
+	// CORS — поверх всего mux: SPA дёргает API из браузера с другого origin.
 	httpServer := &http.Server{
 		Addr:         cfg.ServerAddr,
-		Handler:      mux,
+		Handler:      withCORS(mux),
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,

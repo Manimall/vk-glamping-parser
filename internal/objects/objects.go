@@ -21,6 +21,7 @@ type Cabin struct {
 
 // Object — конфиг одного глэмпинга. Все поля необязательные: чего нет — то пусто.
 type Object struct {
+	Slug    string   `json:"slug"`    // URL-идентификатор каталога (нет — slugify(domain))
 	Address string   `json:"address"` // адрес (VK у юзеров не отдаёт)
 	Coords  string   `json:"coords"`  // "lat,lon"
 	Map     string   `json:"map"`     // ссылка на карту

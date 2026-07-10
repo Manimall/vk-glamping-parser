@@ -15,10 +15,12 @@ type Config struct {
 	// AnthropicKey — ключ для LLM-извлечения структуры (Шаг 2). НЕОБЯЗАТЕЛЬНЫЙ:
 	// если пуст, сервис отдаёт только «сырьё» из VK, без структурирования.
 	AnthropicKey string
-	// ServerAddr — адрес HTTP-сервера, DataDir — каталог конфигов объектов.
-	// Берём из окружения с дефолтами, чтобы не хардкодить в логике.
-	ServerAddr string
-	DataDir    string
+	// ServerAddr — адрес HTTP-сервера, DataDir — каталог конфигов объектов,
+	// GeneratedDir — каталог пакетной выдачи провайдеров (источник каталожного
+	// API v1). Берём из окружения с дефолтами, чтобы не хардкодить в логике.
+	ServerAddr   string
+	DataDir      string
+	GeneratedDir string
 }
 
 // envOr возвращает значение переменной окружения или дефолт, если она пуста.
@@ -46,5 +48,6 @@ func Load() (*Config, error) {
 		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY"),
 		ServerAddr:   envOr("SERVER_ADDR", ":8080"),
 		DataDir:      envOr("DATA_DIR", "data"),
+		GeneratedDir: envOr("GENERATED_DIR", "generated"),
 	}, nil
 }

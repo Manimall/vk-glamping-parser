@@ -68,7 +68,7 @@ func runProvider(cfg *config.Config, name, outDir string) error {
 	}
 
 	if outDir == "" {
-		outDir = filepath.Join("generated", p.Name())
+		outDir = filepath.Join(cfg.GeneratedDir, p.Name())
 	}
 	if err := writeObjects(outDir, objects); err != nil {
 		return err

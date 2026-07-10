@@ -31,14 +31,36 @@ type Cabin struct {
 // галерея) + список домиков. Единый JSON-контракт для фронта. omitempty убирает
 // поля, которых нет.
 type Object struct {
+	Slug     string          `json:"slug,omitempty"`     // URL-идентификатор (/api/v1/glampings/<slug>)
 	Title    string          `json:"title,omitempty"`    // название объекта
 	About    string          `json:"about,omitempty"`    // описание
 	Location string          `json:"location,omitempty"` // адрес/город/регион
 	Coords   *Coords         `json:"coords,omitempty"`   // координаты (если есть)
 	MapURL   string          `json:"mapUrl,omitempty"`   // ссылка на карту
 	Contact  string          `json:"contact,omitempty"`  // телефон/контакт
+	Cover    string          `json:"cover,omitempty"`    // обложка-превью (карточка главной, OG)
 	Photos   []string        `json:"photos"`             // галерея (URL кадров)
 	Cabins   []Cabin         `json:"cabins"`             // домики с удобствами
 	Extras   []extract.Extra `json:"extras,omitempty"`   // доп.услуги объекта
 	Seo      *extract.SEO    `json:"seo,omitempty"`      // SEO/OG-тексты (без бренда фронта)
+}
+
+// Preview — облегчённая карточка для списков (главная страница каталога):
+// только то, что нужно отрисовать плитку — без галереи, удобств и правил.
+type Preview struct {
+	Slug     string       `json:"slug"`
+	Title    string       `json:"title"`
+	Location string       `json:"location,omitempty"`
+	Cover    string       `json:"cover,omitempty"`
+	Price    string       `json:"price,omitempty"` // цена первого домика («7 000 ₽»)
+	Seo      *extract.SEO `json:"seo,omitempty"`   // OG-тексты для шаринга ссылки
+}
+
+// ToPreview собирает превью из полной карточки (цена — у первого домика).
+func (o Object) ToPreview() Preview {
+	p := Preview{Slug: o.Slug, Title: o.Title, Location: o.Location, Cover: o.Cover, Seo: o.Seo}
+	if len(o.Cabins) > 0 {
+		p.Price = o.Cabins[0].Price
+	}
+	return p
 }

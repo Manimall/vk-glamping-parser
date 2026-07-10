@@ -1,10 +1,12 @@
 package glamping_rf
 
 import (
+	"fmt"
 	"strings"
 
 	"vk-parser/internal/contract"
 	"vk-parser/internal/extract"
+	"vk-parser/internal/slug"
 )
 
 // amenitiesGroupTitle — заголовок группы удобств в карточке (единый стиль контракта).
@@ -19,10 +21,14 @@ func toObject(it apiItem) contract.Object {
 	photos := collectPhotos(it)
 
 	obj := contract.Object{
+		// Слаг: транслит имени + id источника — уникален даже при одинаковых
+		// названиях («Деревня Ильино» id=959 → "derevnya-ilino-959").
+		Slug:     slug.Make(fmt.Sprintf("%s %d", title, it.ID)),
 		Title:    title,
 		Location: location,
 		Contact:  strings.TrimSpace(it.Telephone),
 		MapURL:   strings.TrimSpace(it.Website),
+		Cover:    firstNonEmpty(it.ThumbMain.SrcWebp, it.ThumbMain.Src),
 		Photos:   photos,
 		Cabins: []contract.Cabin{{
 			Title: title,

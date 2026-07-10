@@ -10,6 +10,7 @@ import (
 	"vk-parser/internal/contract"
 	"vk-parser/internal/extract"
 	"vk-parser/internal/objects"
+	"vk-parser/internal/slug"
 	"vk-parser/internal/vk"
 	"vk-parser/providers"
 )
@@ -103,6 +104,13 @@ func (p *Parser) Build(ctx context.Context, q Query) (contract.Object, error) {
 	}
 
 	data := contract.Object{Photos: photos, Cabins: []contract.Cabin{}}
+	// Слаг каталога: ручной из конфига (напр. "aframe-ivanovo") приоритетнее;
+	// иначе — из VK-домена ("aframe_iv" → "aframe-iv"). Обложка — первый кадр
+	// галереи (конвейер -export ставит обзорный кадр первым).
+	data.Slug = slug.Make(q.Domain)
+	if len(photos) > 0 {
+		data.Cover = photos[0]
+	}
 
 	// Объект-уровень: название/локация/контакт из инфо сообщества. Метод только для
 	// групп; для пользователей VK вернёт ошибку — graceful.
@@ -128,6 +136,9 @@ func (p *Parser) Build(ctx context.Context, q Query) (contract.Object, error) {
 	coordsRaw, mapURL, itemsRaw := q.Coords, q.MapURL, q.Items
 	var manual []objects.Cabin
 	if cfg != nil {
+		if cfg.Slug != "" {
+			data.Slug = cfg.Slug
+		}
 		if coordsRaw == "" {
 			coordsRaw = cfg.Coords
 		}

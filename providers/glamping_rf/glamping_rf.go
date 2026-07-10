@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"vk-parser/internal/contract"
+	"vk-parser/providers"
 )
 
 const (
@@ -113,19 +114,8 @@ func (p *Provider) collectPlace(ctx context.Context, direction string, place int
 		if !resp.HasMore || len(resp.Items) == 0 || len(*out) >= p.minObjects {
 			return
 		}
-		sleepCtx(ctx, p.delay)
-		if ctx.Err() != nil {
-			return
+		if !providers.SleepCtx(ctx, p.delay) {
+			return // ctx отменён — сворачиваем сбор
 		}
-	}
-}
-
-// sleepCtx спит d, но прерывается при отмене ctx (таймаут / Ctrl+C).
-func sleepCtx(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-	case <-t.C:
 	}
 }

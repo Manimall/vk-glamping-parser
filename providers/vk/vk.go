@@ -11,15 +11,17 @@ import (
 	"vk-parser/internal/extract"
 	"vk-parser/internal/objects"
 	"vk-parser/internal/vk"
+	"vk-parser/providers"
 )
 
 const (
 	// maxPhotos — сколько лучших фото оставляем в галерее (перенесено из app).
 	maxPhotos = 15
 	// objectDelay — пауза между объектами при пакетном сборе: VK лимитирует ~3
-	// запроса/с, а каждый объект делает несколько вызовов. HTTP-режим (один объект
-	// на запрос) задержку не использует — поведение не меняется.
-	objectDelay = 400 * time.Millisecond
+	// запроса/с, а каждый объект делает 4-5 вызовов подряд (resolve, photos,
+	// groupInfo, market×2) — нужна пауза с запасом, чтобы «остыть». HTTP-режим
+	// (один объект на запрос) задержку не использует — поведение не меняется.
+	objectDelay = 1500 * time.Millisecond
 )
 
 // vkAPI — то, что провайдеру нужно от VK. *vk.Client удовлетворяет структурно;
@@ -71,7 +73,7 @@ func (p *Parser) Parse(ctx context.Context) ([]contract.Object, error) {
 	out := make([]contract.Object, 0, len(domains))
 	for i, d := range domains {
 		if i > 0 {
-			if !sleepCtx(ctx, objectDelay) {
+			if !providers.SleepCtx(ctx, objectDelay) {
 				return out, ctx.Err() // ctx отменён — отдаём собранное
 			}
 		}
@@ -84,18 +86,6 @@ func (p *Parser) Parse(ctx context.Context) ([]contract.Object, error) {
 		slog.Info("vk: объект собран", "domain", d, "cabins", len(obj.Cabins))
 	}
 	return out, nil
-}
-
-// sleepCtx спит d, прерываясь при отмене ctx. Возвращает false, если ctx отменён.
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
 }
 
 // Build — «бизнес-логика» одного объекта: объект-уровень (инфо группы + галерея) и

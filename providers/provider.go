@@ -9,6 +9,7 @@ package providers
 
 import (
 	"context"
+	"time"
 
 	"vk-parser/internal/contract"
 )
@@ -21,4 +22,18 @@ type Provider interface {
 	// на фатальном сбое (сеть/конфиг недоступны); сбой отдельного объекта или
 	// страницы не должен ронять весь сбор — это логируется (WARN) и пропускается.
 	Parse(ctx context.Context) ([]contract.Object, error)
+}
+
+// SleepCtx — «вежливая» пауза между запросами источника (анти-бан), прерываемая
+// отменой ctx. false — ctx отменён, сбор надо сворачивать. Общий хелпер для всех
+// провайдеров (DRY: не дублировать в каждом).
+func SleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }

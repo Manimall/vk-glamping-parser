@@ -18,10 +18,11 @@ import (
 	"time"
 
 	"vk-parser/internal/cache"
+	"vk-parser/internal/catalog"
 	"vk-parser/internal/config"
-	"vk-parser/internal/extract"
 	"vk-parser/internal/geocode"
 	"vk-parser/internal/vk"
+	vkprovider "vk-parser/providers/vk"
 )
 
 const (
@@ -43,28 +44,40 @@ const (
 // длинного списка аргументов. Новая зависимость = новое поле здесь, без правки
 // сигнатур хендлеров.
 type server struct {
-	// client и geocoder — ИНТЕРФЕЙСЫ (см. deps.go), а не конкретные типы. server
-	// не привязан к *vk.Client/*geocode.Client: в проде кладём настоящие, в
-	// тестах — фейки без сети.
-	client    vkAPI
-	store     *cache.Cache[GlampingData]
-	extractor extract.Extractor
-	geocoder  geocoderAPI
-	// dataDir — каталог конфигов объектов. Поле (а не глобальная константа),
-	// чтобы тест мог указать свой testdata.
-	dataDir string
+	// parser — VK-провайдер (собирает карточку объекта из VK). Вся VK-логика
+	// изолирована в providers/vk; HTTP-обработчик лишь делегирует ей. store — кэш
+	// ответов. В тестах parser собирается с фейковым VK-клиентом (без сети).
+	parser *vkprovider.Parser
+	store  *cache.Cache[GlampingData]
 }
 
 func main() {
 	// Флаги. Если задан -export <domain> — собираем галерею фото объекта и выходим
 	// (CLI-режим экспорта), иначе поднимаем HTTP-сервер.
 	exportDomain := flag.String("export", "", "домен объекта: собрать photo-N.webp и выйти (вместо сервера)")
-	exportOut := flag.String("out", "", "каталог для экспортированных фото (по умолчанию export/<domain>)")
+	exportOut := flag.String("out", "", "каталог вывода (-export фото / --provider JSON)")
+	providerName := flag.String("provider", "", "пакетный сбор источника: glamping → generated/<name>/objects.json")
 	flag.Parse()
 
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("startup failed", "err", err)
+		os.Exit(1)
+	}
+
+	// Режим провайдера: пакетный сбор источника в generated/ и выход. VK-токен
+	// здесь не требуется (провайдер glamping ходит на свой сайт).
+	if *providerName != "" {
+		if err := runProvider(cfg, *providerName, *exportOut); err != nil {
+			slog.Error("provider failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Дальше — VK-режимы (сервер / -export): им нужен токен.
+	if cfg.VKToken == "" {
+		slog.Error("startup failed", "err", "VK_TOKEN is not set")
 		os.Exit(1)
 	}
 
@@ -78,36 +91,30 @@ func main() {
 		return
 	}
 
-	// Composition root: единственное место, где собираем граф зависимостей.
+	// Composition root: собираем VK-провайдер (движок извлечения выбирает
+	// chooseExtractor: LLM при ключе, иначе бесплатная эвристика) и HTTP-сервер
+	// поверх него. Вся VK-логика — в providers/vk; server лишь делегирует.
 	srv := &server{
-		client:   vk.NewClient(cfg.VKToken),
-		store:    cache.New[GlampingData](cacheTTL),
-		geocoder: geocode.New(),
-		dataDir:  cfg.DataDir,
+		parser: vkprovider.New(vk.NewClient(cfg.VKToken), chooseExtractor(cfg), geocode.New(), cfg.DataDir),
+		store:  cache.New[GlampingData](cacheTTL),
 	}
 
-	// Выбор движка извлечения. Есть ключ — берём умный LLM; нет — бесплатную
-	// эвристику. Структура одинаковая, отличается только «начинка» — в этом и
-	// смысл интерфейса: остальной код (хендлер) не меняется ни на строку.
-	if cfg.AnthropicKey != "" {
-		srv.extractor = extract.NewLLM(cfg.AnthropicKey)
-		slog.Info("извлечение: LLM (ANTHROPIC_API_KEY задан)")
-	} else {
-		srv.extractor = extract.NewHeuristic()
-		slog.Info("извлечение: эвристика (бесплатно, без ключа)")
-	}
+	// Каталожный API v1: репозиторий над generated/ (пакетная выдача провайдеров).
+	api := &catalogAPI{repo: catalog.New(cfg.GeneratedDir)}
 
-	// Роутер. srv.handleGlamping — это «method value»: метод, привязанный к srv,
-	// который сам по себе реализует http.HandlerFunc. Фабрика-замыкание больше
-	// не нужна — зависимости уже внутри srv.
+	// Роутер. Хендлеры — «method value»: методы, привязанные к srv/api, сами по
+	// себе реализуют http.HandlerFunc — зависимости уже внутри ресиверов.
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/glamping", srv.handleGlamping)
+	mux.HandleFunc("GET /api/glamping", srv.handleGlamping) // live-сбор VK (как раньше)
+	mux.HandleFunc("GET /api/v1/glampings", api.handleList)
+	mux.HandleFunc("GET /api/v1/glampings/{slug}", api.handleGet)
 
 	// Транспорт (http.Server) — отдельная сущность от нашего server. Свой сервер
 	// с таймаутами (НЕ http.ListenAndServe без настроек — он без таймаутов).
+	// CORS — поверх всего mux: SPA дёргает API из браузера с другого origin.
 	httpServer := &http.Server{
 		Addr:         cfg.ServerAddr,
-		Handler:      mux,
+		Handler:      withCORS(mux),
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,

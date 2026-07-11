@@ -30,6 +30,7 @@ import (
 	"vk-parser/internal/objects"
 	"vk-parser/internal/vision"
 	"vk-parser/internal/vk"
+	vkprovider "vk-parser/providers/vk"
 )
 
 const (
@@ -125,7 +126,7 @@ func configuredItemIDs(cfg *config.Config, domain string, ownerID int64) []strin
 	if obj == nil || len(obj.Items) == 0 {
 		return nil
 	}
-	return marketIDsFromParam(strings.Join(obj.Items, ","), ownerID)
+	return vkprovider.MarketIDsFromParam(strings.Join(obj.Items, ","), ownerID)
 }
 
 // resolveSource — «мозг» выбора источника. Стратегия проста и приоритетна:

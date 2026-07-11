@@ -33,6 +33,11 @@ func selectProvider(name string, cfg *config.Config) (providers.Provider, error)
 	case "glamping", "glamping_rf":
 		return glamping_rf.New(), nil
 	case "vk":
+		// Fail-fast: без токена каждый домен молча упал бы per-domain (graceful
+		// WARN) и вышел бы «успешный» пустой objects.json — маскировка мисконфига.
+		if cfg.VKToken == "" {
+			return nil, fmt.Errorf("провайдер vk требует VK_TOKEN")
+		}
 		return vkprovider.New(vk.NewClient(cfg.VKToken), chooseExtractor(cfg), geocode.New(), cfg.DataDir), nil
 	default:
 		return nil, fmt.Errorf("неизвестный провайдер %q (доступно: vk, glamping)", name)

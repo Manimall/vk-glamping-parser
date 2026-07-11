@@ -42,6 +42,12 @@ func newClient() *Client {
 
 // fetchPage тянет одну страницу каталога для фильтра place. Ошибка — только на
 // сетевом/HTTP/JSON сбое; вызывающий решает, прерывать ли сбор.
+//
+// [Go для изучения] (c *Client) перед именем — «ресивер»: метод привязан к типу
+// Client (как метод класса в JS). Звёздочка = указатель: метод работает с тем же
+// экземпляром, а не с копией. url.Values — аналог URLSearchParams. Возврат двух
+// значений (*apiResponse, error) — идиома Go вместо try/catch: ошибку возвращают
+// как значение, а %w в fmt.Errorf «оборачивает» её, сохраняя цепочку причин.
 func (c *Client) fetchPage(ctx context.Context, place, page int) (*apiResponse, error) {
 	q := url.Values{}
 	q.Set("route", "product/category/list")
@@ -61,6 +67,8 @@ func (c *Client) fetchPage(ctx context.Context, place, page int) (*apiResponse, 
 	if err != nil {
 		return nil, fmt.Errorf("glamping_rf: do request place=%d page=%d: %w", place, page, err)
 	}
+	// defer = «выполни при выходе из функции» (как finally): тело ответа
+	// закроется при ЛЮБОМ из return ниже — и успешном, и ошибочном.
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("glamping_rf: status %d place=%d page=%d", resp.StatusCode, place, page)

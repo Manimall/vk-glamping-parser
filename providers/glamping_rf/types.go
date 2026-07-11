@@ -4,6 +4,13 @@ package glamping_rf
 //   GET index.php?route=product/category/list&path=82&place=<id>&page=<N>
 //   заголовок X-Requested-With: XMLHttpRequest
 // Держим только поля, которые реально используем в маппинге на contract.Object.
+//
+// [Go для изучения] Видимость решает РЕГИСТР первой буквы: apiItem со строчной —
+// приватен для пакета (наружу не экспортируется), Object с заглавной в contract —
+// публичен. Это единственный механизм public/private в Go, никаких ключевых слов.
+// Бэктик-теги `json:"name_new"` говорят encoding/json, как маппить snake_case
+// поля JSON на Go-имена — аналог описания формы ответа в TS-интерфейсе, только
+// теги ещё и управляют (де)сериализацией в рантайме.
 
 // apiResponse — страница выдачи каталога.
 type apiResponse struct {

@@ -41,6 +41,9 @@ func toObject(it apiItem) contract.Object {
 			},
 		}},
 	}
+	// [Go для изучения] &Тип{...} создаёт значение и сразу берёт указатель на
+	// него. Coords в контракте — указатель ради omitempty: nil-указатель JSON
+	// опускает поле, а «нулевую» структуру {0,0} опустить бы не смог.
 	if it.Lat != 0 || it.Lng != 0 {
 		obj.Coords = &contract.Coords{Lat: it.Lat, Lon: it.Lng}
 	}
@@ -94,6 +97,10 @@ func amenityGroups(services []apiService) []extract.AmenityGroup {
 }
 
 // firstNonEmpty — первая непустая (после трима) строка из переданных.
+//
+// [Go для изучения] vals ...string — вариадик (rest-параметр ...args из JS):
+// внутри функции vals — обычный слайс. Вызов с обратной операцией-«spread» —
+// f(slice...) — разворачивает слайс в аргументы.
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if t := strings.TrimSpace(v); t != "" {

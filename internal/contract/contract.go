@@ -57,6 +57,11 @@ type Preview struct {
 }
 
 // ToPreview собирает превью из полной карточки (цена — у первого домика).
+//
+// [Go для изучения] Ресивер (o Object) БЕЗ звёздочки — метод получает КОПИЮ
+// структуры: читать можно, а мутировать оригинал — нет, что здесь и нужно
+// (чистое преобразование). Указательный ресивер (o *Object) брали бы для
+// мутаций или чтобы не копировать крупную структуру.
 func (o Object) ToPreview() Preview {
 	p := Preview{Slug: o.Slug, Title: o.Title, Location: o.Location, Cover: o.Cover, Seo: o.Seo}
 	if len(o.Cabins) > 0 {

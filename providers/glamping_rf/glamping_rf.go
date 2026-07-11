@@ -66,6 +66,9 @@ func (p *Provider) Name() string { return "glamping_rf" }
 // Parse обходит направления и их регионы, набирая уникальные (по id) объекты.
 // Останавливается, как только собрано minObjects, либо когда страницы кончились.
 func (p *Provider) Parse(ctx context.Context) ([]contract.Object, error) {
+	// [Go для изучения] map[int]bool — идиома «множество» (Set из JS): ключ есть →
+	// объект уже видели. make(slice, 0, cap) предвыделяет ёмкость: append не будет
+	// перевыделять память, пока не наберём minObjects элементов.
 	seen := make(map[int]bool)
 	out := make([]contract.Object, 0, p.minObjects)
 
@@ -89,6 +92,11 @@ func (p *Provider) Parse(ctx context.Context) ([]contract.Object, error) {
 // collectPlace листает страницы одного региона (place), добавляя новые объекты в
 // out. Останавливается на конце выдачи, достижении minObjects, сбое страницы или
 // предохранителе maxPagesPerPlace. Сбой страницы не фатален — просто выходим.
+//
+// [Go для изучения] out *[]contract.Object — указатель на слайс: append может
+// перевыделить внутренний массив, и без указателя вызывающий не увидел бы
+// добавленного (слайс передаётся по значению — копируется заголовок). map такого
+// не требует: seen — ссылочный тип, правки видны снаружи и так.
 func (p *Provider) collectPlace(ctx context.Context, direction string, place int, seen map[int]bool, out *[]contract.Object) {
 	for page := 1; page <= maxPagesPerPlace; page++ {
 		resp, err := p.fetcher.fetchPage(ctx, place, page)

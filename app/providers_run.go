@@ -28,6 +28,11 @@ const providerTimeout = 10 * time.Minute
 
 // selectProvider — фабрика: имя из CLI → конкретная реализация Provider. Здесь
 // (и только здесь) main знает про конкретные пакеты; дальше — работа через интерфейс.
+//
+// [Go для изучения] switch в Go не «проваливается» между case (break не нужен),
+// а один case принимает несколько значений через запятую. Возвращаем ИНТЕРФЕЙС
+// providers.Provider — вызывающему всё равно, какой конкретный тип внутри
+// (полиморфизм без наследования).
 func selectProvider(name string, cfg *config.Config) (providers.Provider, error) {
 	switch name {
 	case "glamping", "glamping_rf":

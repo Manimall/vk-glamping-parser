@@ -6,9 +6,11 @@ import (
 )
 
 // fakeFetcher — источник страниц из памяти (без сети): pages[place][pageIndex].
+// details — detail-данные по id объекта (nil → «страница не отдалась»).
 type fakeFetcher struct {
-	pages map[int][]*apiResponse
-	calls int
+	pages   map[int][]*apiResponse
+	details map[int]*detailData
+	calls   int
 }
 
 func (f *fakeFetcher) fetchPage(_ context.Context, place, page int) (*apiResponse, error) {
@@ -18,6 +20,13 @@ func (f *fakeFetcher) fetchPage(_ context.Context, place, page int) (*apiRespons
 		return ps[page-1], nil
 	}
 	return &apiResponse{HasMore: false}, nil
+}
+
+func (f *fakeFetcher) fetchDetail(_ context.Context, id int) (*detailData, error) {
+	if d, ok := f.details[id]; ok {
+		return d, nil
+	}
+	return nil, context.Canceled // имитация сбоя detail — объект остаётся с данными списка
 }
 
 func items(ids ...int) []apiItem {

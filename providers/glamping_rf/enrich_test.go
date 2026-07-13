@@ -109,9 +109,36 @@ func TestParse_EnrichesAndAppliesDefaults(t *testing.T) {
 	if out[0].About != "Богатое описание с детальной страницы." {
 		t.Errorf("объект 1 не обогащён: %q", out[0].About)
 	}
-	// Объект 2: detail упал → данные списка + дефолты (graceful).
+	// Объект 2: detail упал ТРАНЗИЕНТНО → оставлен с данными списка + дефолты.
 	cp2 := out[1].Cabins[0].Property
 	if len(cp2.Rules) != len(defaultRules) || len(cp2.Facts) != 3 {
 		t.Errorf("объект 2 без дефолтов: rules=%v facts=%+v", cp2.Rules, cp2.Facts)
+	}
+}
+
+// TestParse_DropsDelistedObjects: объект, чья detail-страница отдаёт 404 (снят
+// с каталога-источника), исключается из выдачи целиком — мёртвые источники не
+// показываем (продуктовое решение). Транзиентный сбой при этом НЕ дропает.
+func TestParse_DropsDelistedObjects(t *testing.T) {
+	f := &fakeFetcher{
+		pages: map[int][]*apiResponse{
+			75: {{Items: items(1, 2, 3), HasMore: false}},
+		},
+		details: map[int]*detailData{1: fullDetail()}, // 2 — транзиентный сбой
+		gone:    map[int]bool{3: true},                // 3 — снят с каталога
+	}
+	p := newTestProvider(f, []direction{{name: "ЗК", places: []int{75}}}, 100)
+
+	out, err := p.Parse(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("снятый объект должен быть исключён: ожидал 2, получил %d", len(out))
+	}
+	for _, o := range out {
+		if o.Slug == "obj-3" {
+			t.Errorf("объект 3 (404) не должен попасть в выдачу")
+		}
 	}
 }

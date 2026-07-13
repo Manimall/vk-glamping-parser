@@ -64,6 +64,27 @@ func TestParseDetailHTML(t *testing.T) {
 	}
 }
 
+// TestParseLdJSON_RawNewlineInsideString воспроизводит реальный баг сайта:
+// буквальный перенос строки ВНУТРИ значения JSON-строки (невалидно по спеке,
+// encoding/json Go иначе падает с «invalid control character»). Нашли на
+// объекте id=1579 (глэмпинги.рф) — без фикса FAQPage не парсился вообще, и
+// объект получал только дефолтные правила вместо реальных с сайта.
+func TestParseLdJSON_RawNewlineInsideString(t *testing.T) {
+	page := "<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"FAQPage\",\"mainEntity\":[" +
+		"{\"@type\":\"Question\",\"name\":\"Какие правила отмены бронирования?\"," +
+		"\"acceptedAnswer\":{\"@type\":\"Answer\",\"text\":\"Едем по шоссе.\nдо поста ДПС.\"}}]}</script>"
+
+	d := &detailData{}
+	parseLdJSON(page, d)
+
+	if len(d.Rules) != 1 {
+		t.Fatalf("FAQ с сырым переносом строки внутри значения должен распарситься, получил rules=%v", d.Rules)
+	}
+	if strings.Contains(d.Rules[0], "\n") {
+		t.Errorf("перенос строки должен схлопнуться в пробел: %q", d.Rules[0])
+	}
+}
+
 func TestCleanRule_CutsAtSentence(t *testing.T) {
 	long := strings.Repeat("Первое предложение. ", 20) // > maxRuleRunes
 	got := cleanRule(long)

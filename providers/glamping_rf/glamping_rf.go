@@ -10,6 +10,7 @@ package glamping_rf
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -90,45 +91,66 @@ collect:
 				break collect
 			}
 			if ctx.Err() != nil {
-				return objects(items), ctx.Err()
+				// Отмена во время сбора: обогащать поздно — отдаём как есть.
+				return rawObjects(items), ctx.Err()
 			}
 		}
 	}
 
-	p.enrichAll(ctx, items)
-	slog.Info("glamping_rf: сбор завершён", "unique", len(items))
-	return objects(items), ctx.Err()
+	kept := p.enrichAll(ctx, items)
+	slog.Info("glamping_rf: сбор завершён",
+		"unique", len(kept), "снято_с_каталога", len(items)-len(kept))
+	return kept, ctx.Err()
 }
 
 // enrichAll — фаза обогащения: detail-страница на объект, с паузой между
-// запросами (анти-бан). Дефолты применяются ВСЕГДА (и при сбое detail).
-func (p *Provider) enrichAll(ctx context.Context, items []collected) {
+// запросами (анти-бан). Объекты, СНЯТЫЕ с каталога (detail → 404), в выдачу
+// не попадают — мёртвый источник не показываем (продуктовое решение). Прочие
+// сбои (таймаут/5xx) объект не выкидывают: остаётся с данными списка + дефолты.
+func (p *Provider) enrichAll(ctx context.Context, items []collected) []contract.Object {
+	out := make([]contract.Object, 0, len(items))
 	for i := range items {
 		if ctx.Err() != nil {
-			return
+			return out
 		}
-		if d, err := p.fetcher.fetchDetail(ctx, items[i].id); err != nil {
-			slog.Warn("glamping_rf: detail пропущен", "id", items[i].id, "err", err)
-		} else {
-			mergeDetail(&items[i].obj, d)
+		if p.enrichOne(ctx, &items[i]) {
+			out = append(out, items[i].obj)
 		}
-		applyDefaults(&items[i].obj)
 		if i%10 == 9 {
 			slog.Info("glamping_rf: обогащение", "готово", i+1, "из", len(items))
 		}
 		if i < len(items)-1 && !providers.SleepCtx(ctx, p.delay) {
-			return
+			return out
 		}
 	}
+	return out
 }
 
-// objects распаковывает собранное в срез контракта.
-func objects(items []collected) []contract.Object {
+// rawObjects — собранное без обогащения (путь досрочной отмены ctx).
+func rawObjects(items []collected) []contract.Object {
 	out := make([]contract.Object, len(items))
 	for i, it := range items {
 		out[i] = it.obj
 	}
 	return out
+}
+
+// enrichOne — обогащение одного объекта. false → объект снят с каталога
+// (исключить из выдачи); true → оставить (обогащён либо с дефолтами).
+func (p *Provider) enrichOne(ctx context.Context, it *collected) bool {
+	d, err := p.fetcher.fetchDetail(ctx, it.id)
+	switch {
+	case err == nil:
+		mergeDetail(&it.obj, d)
+	case errors.Is(err, errDetailGone):
+		slog.Info("glamping_rf: объект исключён (снят с каталога)",
+			"id", it.id, "title", it.obj.Title)
+		return false
+	default:
+		slog.Warn("glamping_rf: detail пропущен (объект оставлен)", "id", it.id, "err", err)
+	}
+	applyDefaults(&it.obj)
+	return true
 }
 
 // collectPlace листает страницы одного региона (place), добавляя новые объекты в

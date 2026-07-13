@@ -53,7 +53,16 @@ func mergeDetail(obj *contract.Object, d *detailData) {
 	if len(d.Amenities) > 0 {
 		cp.AmenityGroups = mergeAmenities(cp.AmenityGroups, d.Amenities)
 	}
-	// SEO пересобираем: описание стало богаче (BuildSEO берёт «питч» из About).
+	rebuildSEO(obj)
+}
+
+// rebuildSEO пересобирает SEO после обогащения: описание стало богаче,
+// а BuildSEO берёт «питч» именно из About. Общий шаг для обоих источников
+// обогащения (detail-страница агрегатора / собственный сайт объекта).
+func rebuildSEO(obj *contract.Object) {
+	if len(obj.Cabins) == 0 {
+		return
+	}
 	seo := extract.BuildSEO(extract.SEOInput{
 		Name: obj.Cabins[0].Title, Location: obj.Location, About: obj.About,
 	})

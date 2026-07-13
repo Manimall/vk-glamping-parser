@@ -11,6 +11,7 @@ package glamping_rf
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -19,6 +20,11 @@ import (
 	"strconv"
 	"strings"
 )
+
+// errDetailGone — detail-страница отдала 404: объект СНЯТ с каталога-источника.
+// Сигнал вызывающему исключить объект из выдачи (мёртвый источник ≠ сетевой
+// глюк: таймауты/5xx этим НЕ считаются — по ним объект остаётся с дефолтами).
+var errDetailGone = errors.New("glamping_rf: объект снят с каталога (404)")
 
 const (
 	// detailURL — страница объекта (без query-мусора из href списка).
@@ -99,6 +105,9 @@ func (c *Client) fetchDetail(ctx context.Context, id int) (*detailData, error) {
 		return nil, fmt.Errorf("glamping_rf: detail id=%d: %w", id, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("id=%d: %w", id, errDetailGone)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("glamping_rf: detail id=%d status %d", id, resp.StatusCode)
 	}
@@ -126,19 +135,27 @@ func parseDetailHTML(page string, id int) *detailData {
 	return d
 }
 
+// rawControlCharsRe — сайт кладёт в значения JSON-строк БУКВАЛЬНЫЕ переносы
+// строк/табы вместо \n/\t (невалидно по JSON-спеке: control-символы обязаны
+// быть экранированы). encoding/json Go строг и падает на этом с "invalid
+// control character". Вне строк эти же символы — обычные пробелы-разделители
+// между токенами, так что безопасно заменить их везде на пробел до парсинга.
+var rawControlCharsRe = regexp.MustCompile(`[\x00-\x1F]`)
+
 // parseLdJSON разбирает оба ld+json блока (LodgingBusiness и FAQPage).
 func parseLdJSON(page string, d *detailData) {
-	for _, m := range ldJSONRe.FindAllStringSubmatch(page, -1) {
+	for _, raw := range ldJSONRe.FindAllStringSubmatch(page, -1) {
+		m1 := rawControlCharsRe.ReplaceAllString(raw[1], " ")
 		var probe struct {
 			Type string `json:"@type"`
 		}
-		if json.Unmarshal([]byte(m[1]), &probe) != nil {
+		if json.Unmarshal([]byte(m1), &probe) != nil {
 			continue
 		}
 		switch probe.Type {
 		case "LodgingBusiness", "Campground", "Hotel":
 			var lb ldLodging
-			if json.Unmarshal([]byte(m[1]), &lb) == nil {
+			if json.Unmarshal([]byte(m1), &lb) == nil {
 				d.Description = strings.TrimSpace(lb.Description)
 				d.CheckIn, d.CheckOut = lb.CheckinTime, lb.CheckoutTime
 				d.Rating = formatRating(lb.AggregateRating.RatingValue)
@@ -151,7 +168,7 @@ func parseLdJSON(page string, d *detailData) {
 			}
 		case "FAQPage":
 			var faq ldFAQ
-			if json.Unmarshal([]byte(m[1]), &faq) == nil {
+			if json.Unmarshal([]byte(m1), &faq) == nil {
 				d.Rules = faqRules(faq)
 			}
 		}

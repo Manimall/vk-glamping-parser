@@ -6,10 +6,12 @@ import (
 )
 
 // fakeFetcher — источник страниц из памяти (без сети): pages[place][pageIndex].
-// details — detail-данные по id объекта (nil → «страница не отдалась»).
+// details — detail по id (нет в мапе → транзиентный сбой); gone — id, чьи
+// detail-страницы отдают 404 (объект снят с каталога).
 type fakeFetcher struct {
 	pages   map[int][]*apiResponse
 	details map[int]*detailData
+	gone    map[int]bool
 	calls   int
 }
 
@@ -23,10 +25,13 @@ func (f *fakeFetcher) fetchPage(_ context.Context, place, page int) (*apiRespons
 }
 
 func (f *fakeFetcher) fetchDetail(_ context.Context, id int) (*detailData, error) {
+	if f.gone[id] {
+		return nil, errDetailGone // объект снят с каталога → должен быть исключён
+	}
 	if d, ok := f.details[id]; ok {
 		return d, nil
 	}
-	return nil, context.Canceled // имитация сбоя detail — объект остаётся с данными списка
+	return nil, context.Canceled // транзиентный сбой — объект остаётся с дефолтами
 }
 
 func items(ids ...int) []apiItem {

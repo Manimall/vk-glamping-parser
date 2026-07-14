@@ -23,11 +23,12 @@ const (
 	httpTimeout = 20 * time.Second
 )
 
-// pageFetcher — то, что провайдеру нужно от источника: получить одну страницу
-// выдачи для региона. Интерфейс (а не конкретный Client) — чтобы Parse можно было
-// тестировать на фейке без сети (Dependency Inversion).
+// pageFetcher — то, что провайдеру нужно от источника: страница выдачи региона
+// и detail-страница объекта (обогащение). Интерфейс (а не конкретный Client) —
+// чтобы Parse можно было тестировать на фейке без сети (Dependency Inversion).
 type pageFetcher interface {
 	fetchPage(ctx context.Context, place, page int) (*apiResponse, error)
+	fetchDetail(ctx context.Context, id int) (*detailData, error)
 }
 
 // Client — HTTP-клиент к JSON-API глэмпинги.рф. Переиспользуемый (один на провайдер).

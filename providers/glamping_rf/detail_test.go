@@ -73,6 +73,36 @@ func TestParseDetailHTML(t *testing.T) {
 	}
 }
 
+func TestDetailArea(t *testing.T) {
+	cases := []struct {
+		name string
+		page string
+		want string
+	}{
+		{
+			name: "комплекс: разные дома → от минимума",
+			page: `<img alt="Площадь"> 165 м²<img alt="Площадь"> 180 м<img alt="Площадь"> 100 м²`,
+			want: "от 100 м²",
+		},
+		{
+			name: "один тип дома: все площади равны → без «от»",
+			page: `<img alt="Площадь"> 29 м²<img alt="Площадь"> 29 м`,
+			want: "29 м²",
+		},
+		{
+			name: "легаси-формат Площадь: N м² (фоллбэк)",
+			page: `<div>Площадь: 80 м²</div>`,
+			want: "80 м²",
+		},
+		{name: "нет площади", page: `<div>без площади</div>`, want: ""},
+	}
+	for _, c := range cases {
+		if got := detailArea(c.page); got != c.want {
+			t.Errorf("%s: detailArea = %q, ожидал %q", c.name, got, c.want)
+		}
+	}
+}
+
 // TestParseLdJSON_RawNewlineInsideString воспроизводит реальный баг сайта:
 // буквальный перенос строки ВНУТРИ значения JSON-строки (невалидно по спеке,
 // encoding/json Go иначе падает с «invalid control character»). Нашли на

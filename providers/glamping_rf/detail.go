@@ -62,6 +62,10 @@ var capacityRe = regexp.MustCompile(`Вместимость:\s*(\d+)(?:\s*\+\s*(
 // areaRe — «Площадь: 80 м²» (в тексте бывает узкий пробел  ).
 var areaRe = regexp.MustCompile(`Площадь:\s*([\d.,]+)\s*м²`)
 
+// areaAltRe — площадь варианта дома в характеристиках новой вёрстки:
+// <img ... alt="Площадь"> 165 м². У комплекса таких блоков несколько (по дому).
+var areaAltRe = regexp.MustCompile(`alt="Площадь">\s*(\d+)\s*м`)
+
 // ruleKeywordsRe — вопросы FAQ, которые являются ПРАВИЛАМИ проживания.
 var ruleKeywordsRe = regexp.MustCompile(`(?i)отмен|заезд|выезд|животн|питомц|курен|тишин|правил`)
 
@@ -141,10 +145,40 @@ func parseDetailHTML(page string, id int) *detailData {
 		extra, _ := strconv.Atoi(m[2]) // пустая группа → 0
 		d.Guests = base + extra
 	}
-	if m := areaRe.FindStringSubmatch(page); m != nil {
-		d.Area = m[1] + " м²"
-	}
+	d.Area = detailArea(page)
 	return d
+}
+
+// detailArea — площадь объекта из характеристик страницы. У комплекса несколько
+// домов с разной площадью → «от {минимум} м²» (как цена «от N ₽»); один дом
+// (все значения равны) → «{N} м²». Формат alt="Площадь"> N м (новая вёрстка) с
+// фоллбэком на легаси «Площадь: N м²». Нет данных — пустая строка.
+func detailArea(page string) string {
+	var vals []int
+	for _, m := range areaAltRe.FindAllStringSubmatch(page, -1) {
+		if v, _ := strconv.Atoi(m[1]); v > 0 {
+			vals = append(vals, v)
+		}
+	}
+	if len(vals) == 0 {
+		if m := areaRe.FindStringSubmatch(page); m != nil {
+			return m[1] + " м²"
+		}
+		return ""
+	}
+	min, allEqual := vals[0], true
+	for _, v := range vals[1:] {
+		if v < min {
+			min = v
+		}
+		if v != vals[0] {
+			allEqual = false
+		}
+	}
+	if allEqual {
+		return fmt.Sprintf("%d м²", min)
+	}
+	return fmt.Sprintf("от %d м²", min)
 }
 
 // fullDescription — полный текст описания из блока вёрстки data-pv12-desc-full

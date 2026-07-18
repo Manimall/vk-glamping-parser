@@ -26,12 +26,21 @@ const fixtureHTML = `<html><head>
 <img src="https://x.ru/image/cachewebp/catalog/2000/b.webp">
 <img src="https://x.ru/image/cachewebp/catalog/999/other.webp">
 <div>Вместимость: 4 + 2 гостя.Площадь: 80 м².Количество спален: 2</div>
+<div class="desc-text" data-pv12-desc-short>Отдых в лесу у озера. Основные прей…</div>
+<div class="desc-text" data-pv12-desc-full style="display:none">
+  Отдых в лесу у озера. <b>Основные преимущества</b> Полный текст описания,
+  который сайт НЕ кладёт в ld+json (там только обрезка до 300 символов).
+</div>
 </body></html>`
 
 func TestParseDetailHTML(t *testing.T) {
 	d := parseDetailHTML(fixtureHTML, 2000)
 
-	if d.Description != "Отдых в лесу у озера." {
+	// Описание: полный текст из data-pv12-desc-full перекрывает обрезанный
+	// ld+json; теги вычищены, пробелы схлопнуты.
+	wantDesc := "Отдых в лесу у озера. Основные преимущества Полный текст описания, " +
+		"который сайт НЕ кладёт в ld+json (там только обрезка до 300 символов)."
+	if d.Description != wantDesc {
 		t.Errorf("description: %q", d.Description)
 	}
 	if d.CheckIn != "14:00" || d.CheckOut != "12:00" {

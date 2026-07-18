@@ -65,6 +65,14 @@ var areaRe = regexp.MustCompile(`Площадь:\s*([\d.,]+)\s*м²`)
 // ruleKeywordsRe — вопросы FAQ, которые являются ПРАВИЛАМИ проживания.
 var ruleKeywordsRe = regexp.MustCompile(`(?i)отмен|заезд|выезд|животн|питомц|курен|тишин|правил`)
 
+// descFullRe — блок ПОЛНОГО описания в вёрстке (data-pv12-desc-full). В ld+json
+// LodgingBusiness сайт кладёт обрезанные ~300 символов (meta-описание) — полный
+// текст объекта есть только в этом блоке. (?s) — текст многострочный.
+var descFullRe = regexp.MustCompile(`(?s)data-pv12-desc-full[^>]*>(.*?)</div>`)
+
+// spacesRe — схлопывание пробельных последовательностей в один пробел.
+var spacesRe = regexp.MustCompile(`\s+`)
+
 // ldLodging — нужные поля LodgingBusiness (schema.org).
 type ldLodging struct {
 	Type           string `json:"@type"`
@@ -122,6 +130,10 @@ func (c *Client) fetchDetail(ctx context.Context, id int) (*detailData, error) {
 func parseDetailHTML(page string, id int) *detailData {
 	d := &detailData{}
 	parseLdJSON(page, d)
+	// Полное описание из вёрстки перекрывает обрезанный ld+json (см. descFullRe).
+	if full := fullDescription(page); full != "" {
+		d.Description = full
+	}
 	d.Photos = detailPhotos(page, id)
 
 	if m := capacityRe.FindStringSubmatch(page); m != nil {
@@ -133,6 +145,21 @@ func parseDetailHTML(page string, id int) *detailData {
 		d.Area = m[1] + " м²"
 	}
 	return d
+}
+
+// fullDescription — полный текст описания из блока вёрстки data-pv12-desc-full
+// (счищаем теги и entities, схлопываем пробелы). Блок встречается на странице
+// дважды (десктоп/мобайл) — берём первый непустой. Нет блока — пустая строка
+// (останется описание из ld+json).
+func fullDescription(page string) string {
+	for _, m := range descFullRe.FindAllStringSubmatch(page, -1) {
+		text := html.UnescapeString(tagRe.ReplaceAllString(m[1], " "))
+		text = strings.TrimSpace(spacesRe.ReplaceAllString(text, " "))
+		if text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 // rawControlCharsRe — сайт кладёт в значения JSON-строк БУКВАЛЬНЫЕ переносы

@@ -28,9 +28,23 @@ type pv12Amenity struct {
 	Desc string `json:"desc"` // текст с ценой: «Доплата 1500р/питомец»
 }
 
-// priceRe — цена из описания услуги: «5000 рублей», «1500р», «3 000 ₽».
-// Требуем ≥3 цифр — иначе ловит «до 4х», «2 часа». Первое совпадение — цена.
-var priceRe = regexp.MustCompile(`(\d[\d\s]{2,}|\d{3,})\s*(?:₽|руб|р\b|р/)`)
+// priceRe — цена с валютой: «5000 рублей», «1500р.», «3 000 ₽», «1000р/питомец».
+// Требуем ≥3 цифр — иначе ловит «до 4х», «2 часа». После одиночной «р» — НЕ
+// буква/цифра либо конец строки: \b в Go ASCII-only и кириллицу не понимает
+// (та же грабля, что с «от» в isRangePrice фронта) — из-за неё «6000р.»
+// раньше оставался без цены.
+var priceRe = regexp.MustCompile(`(\d[\d\s]{2,}|\d{3,})\s*(?:₽|руб|р(?:[^а-яё0-9]|$))`)
+
+// perHourRe — цена без валюты в формате «2500/час» или «15000/3 часа»
+// (сеанс из N часов). Группа 2 — длительность сеанса, если указана.
+var perHourRe = regexp.MustCompile(`(\d[\d\s]{2,}|\d{3,})\s*/\s*(\d+)?\s*час`)
+
+// costWordRe — «Стоимость сеанса 10000»: голая сумма в пределах 20 символов
+// после слова «стоимость» (валюту на сайте часто опускают).
+var costWordRe = regexp.MustCompile(`(?i)стоимость[^0-9]{0,20}(\d[\d\s]{2,}|\d{3,})`)
+
+// bareNumberRe — описание целиком из одного числа («350» у халатов) — это цена.
+var bareNumberRe = regexp.MustCompile(`^\s*(\d[\d\s]{1,8})\s*$`)
 
 // hourlyTailWindow — сколько символов после суммы смотрим в поисках «час»
 // («1200 руб. в час», «5000 рублей в час»): дальше по тексту слово «час» уже
@@ -66,25 +80,51 @@ func detailPaidExtras(page string) []extract.Extra {
 	return extras
 }
 
-// priceFromDesc — цена доп.услуги из её описания: «N ₽» (как у списка) либо
-// «N ₽/час» для почасовых («1200 руб. в час»). Честность прайса: почасовую
-// нельзя выдавать за цену «за всё» — гость решит, что баня стоит 1 200 ₽,
-// а реально «минимум 3 часа». Нет распознаваемой цены — пустая строка.
+// priceFromDesc — цена доп.услуги из её описания. Форматы по убыванию
+// уверенности: сумма с валютой («1500р.», «3 000 ₽»); без валюты «2500/час» и
+// сеанс «15000/3 часа»; «Стоимость сеанса 10000»; описание из одного числа.
+// Честность прайса: почасовую/сеансовую нельзя выдавать за цену «за всё» —
+// суффикс «/час» или «за N ч». Нет распознаваемой цены — пустая строка.
 func priceFromDesc(desc string) string {
-	loc := priceRe.FindStringSubmatchIndex(desc)
-	if loc == nil {
-		return ""
+	if loc := priceRe.FindStringSubmatchIndex(desc); loc != nil {
+		n := parseDigits(desc[loc[2]:loc[3]])
+		if n <= 0 {
+			return ""
+		}
+		tail := desc[loc[1]:min(len(desc), loc[1]+hourlyTailWindow)]
+		if hourlyRe.MatchString(tail) {
+			return formatRub(n) + "/час"
+		}
+		return formatRub(n)
 	}
-	digits := strings.ReplaceAll(desc[loc[2]:loc[3]], " ", "")
-	n, err := strconv.Atoi(digits)
-	if err != nil || n <= 0 {
-		return ""
+	if m := perHourRe.FindStringSubmatch(desc); m != nil {
+		if n := parseDigits(m[1]); n > 0 {
+			if m[2] != "" {
+				return formatRub(n) + " за " + m[2] + " ч" // сеанс: «15 000 ₽ за 3 ч»
+			}
+			return formatRub(n) + "/час"
+		}
 	}
-	tail := desc[loc[1]:min(len(desc), loc[1]+hourlyTailWindow)]
-	if hourlyRe.MatchString(tail) {
-		return formatRub(n) + "/час"
+	if m := costWordRe.FindStringSubmatch(desc); m != nil {
+		if n := parseDigits(m[1]); n > 0 {
+			return formatRub(n)
+		}
 	}
-	return formatRub(n)
+	if m := bareNumberRe.FindStringSubmatch(desc); m != nil {
+		if n := parseDigits(m[1]); n > 0 {
+			return formatRub(n)
+		}
+	}
+	return ""
+}
+
+// parseDigits — число из строки с пробелами-разделителями («15 000» → 15000).
+func parseDigits(s string) int {
+	n, err := strconv.Atoi(strings.ReplaceAll(s, " ", ""))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // formatRub — цена в стиле сайта: «5 000 ₽» (пробел-разделитель тысяч).

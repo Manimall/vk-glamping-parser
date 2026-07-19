@@ -23,7 +23,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { searchTavily, extractWithOllama, mergeExtraction } from './lib/enrich.mjs'
+import { searchTavily, extractWithOllama, mergeExtraction, assertOllamaAlive } from './lib/enrich.mjs'
 
 // ── Конфиг путей и темпа ─────────────────────────────────────────────────────
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -74,6 +74,7 @@ async function main() {
     for (const o of targets) log.info(`  [dry] ${o.slug} — ${o.title}`)
     return
   }
+  await assertOllamaAlive() // fail fast: без LLM прогон бессмыслен
 
   let processed = 0
   let totalFilled = 0

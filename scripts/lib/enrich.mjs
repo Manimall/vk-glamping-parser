@@ -120,6 +120,21 @@ export function distill(text) {
   return spans.map(([s, e]) => text.slice(s, e)).join(' …\n')
 }
 
+/** Health-check Ollama: мёртвый localhost:11434 иначе даёт десятки тихих
+ *  «fetch failed» по каждому объекту вместо одной понятной ошибки на старте. */
+export async function assertOllamaAlive() {
+  try {
+    const res = await fetch(OLLAMA_URL.replace('/api/generate', '/api/tags'), {
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) throw new Error(`http ${res.status}`)
+  } catch {
+    throw new Error(
+      `Ollama не отвечает (${OLLAMA_URL}). Запусти: ollama serve (модель ${OLLAMA_MODEL})`,
+    )
+  }
+}
+
 // ── Ollama: извлечение структуры из текста ───────────────────────────────────
 // per: «час» если цена почасовая («1200 руб/час») — иначе смержим её как цену
 // «за всё» и обманем гостя (у бань часто «минимум 3 часа»).

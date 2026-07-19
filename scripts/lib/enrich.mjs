@@ -38,16 +38,25 @@ function isAggregator(url) {
   }
 }
 
-/** fetch с повторами: сетевые сбои и 429/5xx ретраятся с паузой. */
+const REQUEST_TIMEOUT_MS = 60000 // advanced-поиск Tavily отвечает до 10-30с
+
+/** fetch с повторами: сетевые сбои и 429/5xx ретраятся с паузой.
+ *  Connection:close — на сериях запросов undici переиспользует сокет, а сервер
+ *  его дропает («fetch failed» залпами при живом одиночном запросе). */
 async function fetchRetry(url, init) {
   let lastErr
   for (let attempt = 0; attempt <= RETRIES; attempt++) {
     try {
-      const res = await fetch(url, init)
+      const res = await fetch(url, {
+        ...init,
+        headers: { ...init.headers, Connection: 'close' },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
       if (res.ok || (res.status < 500 && res.status !== 429)) return res
       lastErr = new Error(`http ${res.status}`)
     } catch (err) {
-      lastErr = err
+      // cause в текст: голое «fetch failed» не диагностируемо.
+      lastErr = new Error(`${err.message}${err.cause ? ` (${err.cause.code ?? err.cause.message})` : ''}`)
     }
     await new Promise((r) => setTimeout(r, RETRY_PAUSE_MS * (attempt + 1)))
   }

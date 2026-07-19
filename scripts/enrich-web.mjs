@@ -3,6 +3,7 @@
 // Ollama (извлечение структуры). Итерирует по объектам с ДЫРАМИ (услуги без
 // цены / нет правил), ищет официальные источники, извлекает структуру LLM-ом и
 // подмешивает БЕЗ перезаписи данных источника. Результат — enriched_objects.json.
+// Логика поиска/извлечения/merge — в lib/enrich.mjs.
 //
 // Зависимости: НЕТ npm-пакетов (голый fetch, Node 18+). Опционально вместо
 // fetch можно поставить официальный клиент: `npm i @tavily/core`.
@@ -17,22 +18,17 @@
 //     распарсенное с глэмпинги.рф не перезаписывается никогда;
 //   - LLM обязан вернуть null, если не уверен, что данные ИМЕННО этого объекта;
 //   - рядом с результатом сохраняются URL-источники (webSources) — проверяемо;
-//   - цены вне здравого диапазона отбрасываются.
+//   - цены вне здравого диапазона отбрасываются (см. lib/enrich.mjs).
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { searchTavily, extractWithOllama, mergeExtraction } from './lib/enrich.mjs'
 
-// ── Конфиг (zero hardcode в логике) ──────────────────────────────────────────
+// ── Конфиг путей и темпа ─────────────────────────────────────────────────────
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const INPUT_FILE = resolve(ROOT, 'generated/glamping_rf/objects.json')
 const OUTPUT_FILE = resolve(ROOT, 'generated/glamping_rf/enriched_objects.json')
-const TAVILY_URL = 'https://api.tavily.com/search'
-const OLLAMA_URL = 'http://127.0.0.1:11434/api/generate'
-const OLLAMA_MODEL = 'llama3.1'
-const MAX_CONTEXT_CHARS = 6000 // бюджет контекста для llama3.1 (8k окно)
-const MIN_PRICE_RUB = 100 // валидация извлечённых цен: дешевле — мусор
-const MAX_PRICE_RUB = 1_000_000 // дороже — галлюцинация
 const PAUSE_MS = 1200 // вежливая пауза между объектами (лимиты Tavily)
 const CHECKPOINT_EVERY = 5 // как часто сбрасывать прогресс на диск
 
@@ -54,100 +50,9 @@ const DRY_RUN = args.has('dry-run')
 // ── Дыры в данных: чего не хватает объекту ───────────────────────────────────
 /** @returns {boolean} есть ли услуги без цены или нет правил */
 function hasGaps(obj) {
-  const extras = obj.extras ?? []
-  const pricelessExtra = extras.some((e) => !e.price)
+  const pricelessExtra = (obj.extras ?? []).some((e) => !e.price)
   const rules = obj.cabins?.[0]?.property?.rules ?? []
   return pricelessExtra || rules.length === 0
-}
-
-// ── Tavily: поиск официальных сведений ───────────────────────────────────────
-/** @returns {Promise<{context: string, sources: string[]}|null>} */
-async function searchTavily(obj) {
-  const query = `глэмпинг ${obj.title} ${obj.location} официальный сайт цены допы правила`
-  const res = await fetch(TAVILY_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_key: process.env.TAVILY_API_KEY,
-      query,
-      search_depth: 'advanced',
-      include_raw_content: true,
-      max_results: 3,
-    }),
-  })
-  if (!res.ok) throw new Error(`tavily ${res.status}`)
-  const data = await res.json()
-  const results = data.results ?? []
-  if (results.length === 0) return null
-  const context = results
-    .map((r) => `Источник: ${r.url}\n${r.raw_content || r.content || ''}`)
-    .join('\n\n---\n\n')
-  return { context, sources: results.map((r) => r.url) }
-}
-
-// ── Ollama: извлечение структуры из текста ───────────────────────────────────
-// per: «час» если цена почасовая («1200 руб/час») — иначе смержим её как цену
-// «за всё» и обманем гостя (у бань часто «минимум 3 часа»).
-const EXTRACT_SCHEMA = `{"has_sauna": boolean|null, "pets_allowed": boolean|null, "extras": [{"name": "строка", "price": число|null, "per": "час"|"разово"|null}]}`
-
-/** @returns {Promise<{has_sauna: boolean|null, pets_allowed: boolean|null, extras: Array<{name: string, price: number|null}>}|null>} */
-async function extractWithOllama(obj, webContext) {
-  const context = `${obj.about ?? ''}\n\n${webContext}`.slice(0, MAX_CONTEXT_CHARS)
-  const prompt = `Ты извлекаешь факты о базе отдыха «${obj.title}» (${obj.location}).
-Ниже — описание объекта и тексты веб-страниц. В текстах могут быть ДРУГИЕ базы отдыха:
-извлекай ТОЛЬКО сведения, которые явно относятся к «${obj.title}» в «${obj.location}».
-Если не уверен — ставь null. Цены только в рублях, числом, без диапазонов (бери минимум).
-Если цена указана ЗА ЧАС («1200 руб. в час») — ставь per: "час"; если разово — per: "разово".
-Ответ строго в JSON формата: ${EXTRACT_SCHEMA}
-
-ТЕКСТЫ:
-${context}`
-
-  const res = await fetch(OLLAMA_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: OLLAMA_MODEL, prompt, format: 'json', stream: false }),
-  })
-  if (!res.ok) throw new Error(`ollama ${res.status}`)
-  const data = await res.json()
-  try {
-    return JSON.parse(data.response)
-  } catch {
-    throw new Error('ollama вернула невалидный JSON')
-  }
-}
-
-// ── Merge: подмешать извлечённое, НЕ трогая данные источника ────────────────
-function validPrice(p) {
-  return typeof p === 'number' && p >= MIN_PRICE_RUB && p <= MAX_PRICE_RUB
-}
-
-const norm = (s) => (s ?? '').toLowerCase().replace(/[^a-zа-яё0-9]+/g, ' ').trim()
-
-/** @returns {number} сколько цен реально подмешано */
-function mergeExtraction(obj, extraction, sources) {
-  let filled = 0
-  const extracted = (extraction.extras ?? []).filter((e) => e?.name && validPrice(e.price))
-  for (const target of obj.extras ?? []) {
-    if (target.price) continue // цена источника — не перезаписываем
-    const match = extracted.find(
-      (e) => norm(e.name) === norm(target.name) || norm(e.name).includes(norm(target.name)),
-    )
-    if (match) {
-      const rub = new Intl.NumberFormat('ru-RU').format(match.price)
-      // Почасовая цена сохраняет «/час» — фронт не даст заказать её фикс-суммой.
-      target.price = match.per === 'час' ? `${rub} ₽/час` : `${rub} ₽`
-      target.priceSource = 'web' // provenance: цена из веб-обогащения
-      filled += 1
-    }
-  }
-  obj.webEnrichment = {
-    hasSauna: extraction.has_sauna ?? null,
-    petsAllowed: extraction.pets_allowed ?? null,
-    sources,
-    enrichedAt: new Date().toISOString(),
-  }
-  return filled
 }
 
 // ── Основной цикл ────────────────────────────────────────────────────────────
@@ -179,11 +84,10 @@ async function main() {
         log.warn(`${obj.slug}: поиск пуст — пропуск`)
       } else {
         const extraction = await extractWithOllama(obj, search.context)
-        if (extraction) {
-          const filled = mergeExtraction(obj, extraction, search.sources)
-          totalFilled += filled
-          log.info(`${obj.slug}: +${filled} цен, sauna=${extraction.has_sauna} pets=${extraction.pets_allowed}`)
-        }
+        const filled = mergeExtraction(obj, extraction, search.sources)
+        totalFilled += filled
+        const foundExtra = obj.webEnrichment.foundServices?.length ?? 0
+        log.info(`${obj.slug}: +${filled} цен (${foundExtra} новых в foundServices), sauna=${extraction.has_sauna} pets=${extraction.pets_allowed}`)
       }
     } catch (err) {
       // Ошибка одного объекта не роняет прогон — идём дальше.

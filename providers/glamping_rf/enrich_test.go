@@ -96,7 +96,7 @@ func TestParse_EnrichesAndAppliesDefaults(t *testing.T) {
 		},
 		details: map[int]*detailData{1: fullDetail()}, // у 2 detail «падает»
 	}
-	p := newTestProvider(f, []direction{{name: "ЗК", places: []int{75}}}, 100)
+	p := newTestProvider(f, []direction{{name: "ЗК", places: []int{75}}})
 
 	out, err := p.Parse(context.Background())
 	if err != nil {
@@ -127,7 +127,7 @@ func TestParse_DropsDelistedObjects(t *testing.T) {
 		details: map[int]*detailData{1: fullDetail()}, // 2 — транзиентный сбой
 		gone:    map[int]bool{3: true},                // 3 — снят с каталога
 	}
-	p := newTestProvider(f, []direction{{name: "ЗК", places: []int{75}}}, 100)
+	p := newTestProvider(f, []direction{{name: "ЗК", places: []int{75}}})
 
 	out, err := p.Parse(context.Background())
 	if err != nil {

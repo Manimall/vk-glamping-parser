@@ -42,8 +42,8 @@ func items(ids ...int) []apiItem {
 	return out
 }
 
-func newTestProvider(f pageFetcher, dirs []direction, min int) *Provider {
-	return &Provider{fetcher: f, directions: dirs, minObjects: min, delay: 0}
+func newTestProvider(f pageFetcher, dirs []direction) *Provider {
+	return &Provider{fetcher: f, directions: dirs, delay: 0}
 }
 
 func TestParse_DedupAcrossPlaces(t *testing.T) {
@@ -51,7 +51,7 @@ func TestParse_DedupAcrossPlaces(t *testing.T) {
 		75: {{Items: items(1, 2), HasMore: false}},
 		68: {{Items: items(2, 3), HasMore: false}}, // 2 — дубль
 	}}
-	p := newTestProvider(f, []direction{{name: "ЗК", places: []int{75, 68}}}, 100)
+	p := newTestProvider(f, []direction{{name: "ЗК", places: []int{75, 68}}})
 
 	out, err := p.Parse(context.Background())
 	if err != nil {
@@ -70,7 +70,7 @@ func TestParse_PaginatesUntilNoMore(t *testing.T) {
 			{Items: items(5), HasMore: false},
 		},
 	}}
-	p := newTestProvider(f, []direction{{name: "МО", places: []int{49}}}, 100)
+	p := newTestProvider(f, []direction{{name: "МО", places: []int{49}}})
 
 	out, _ := p.Parse(context.Background())
 	if len(out) != 5 {
@@ -78,32 +78,24 @@ func TestParse_PaginatesUntilNoMore(t *testing.T) {
 	}
 }
 
-func TestParse_EarlyStopAtMinCoversBothDirections(t *testing.T) {
+func TestParse_FullCollectionDrainsAllDirections(t *testing.T) {
 	f := &fakeFetcher{pages: map[int][]*apiResponse{
 		75: {{Items: items(1), HasMore: false}},
 		68: {{Items: items(2), HasMore: false}},
-		49: { // большое направление — не должно вычерпаться целиком
+		49: { // большое направление вычерпывается ЦЕЛИКОМ (ранней остановки нет)
 			{Items: items(10, 11), HasMore: true},
-			{Items: items(12, 13), HasMore: true},
+			{Items: items(12, 13), HasMore: false},
 		},
 	}}
-	// Порядок: ЗК (мелкое) раньше МО → к остановке оба направления представлены.
 	dirs := []direction{
 		{name: "ЗК", places: []int{75, 68}},
 		{name: "МО", places: []int{49}},
 	}
-	p := newTestProvider(f, dirs, 3)
+	p := newTestProvider(f, dirs)
 
 	out, _ := p.Parse(context.Background())
-	if len(out) < 3 {
-		t.Fatalf("ожидал >= min(3), получил %d", len(out))
-	}
-	// Оба направления: id из ЗК (1/2) и из МО (10/11) присутствуют.
-	ids := map[string]bool{}
-	// out — contract.Object без id; проверяем косвенно: собрано ровно 4
-	// (1,2 из ЗК + 10,11 из МО page1), а page2 (12,13) не запрошена (ранняя стоп).
-	_ = ids
-	if len(out) != 4 {
-		t.Fatalf("ожидал 4 (ЗК:1,2 + МО page1:10,11), получил %d", len(out))
+	// Полный сбор: ЗК (1,2) + МО обе страницы (10,11,12,13) = 6.
+	if len(out) != 6 {
+		t.Fatalf("ожидал 6 (полный сбор всех направлений), получил %d", len(out))
 	}
 }

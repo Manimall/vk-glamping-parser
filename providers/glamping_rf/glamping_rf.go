@@ -2,8 +2,8 @@
 //
 // Источник — внутренний JSON-API каталога (OpenCart, route=product/category/list):
 // чистые данные без парсинга HTML DOM («умное получение данных»). Регион задаётся
-// фильтром place, выдача постранична (has_more) — идём по страницам с задержкой,
-// пока не наберём minObjects уникальных объектов или не кончатся страницы.
+// фильтром place, выдача постранична (has_more) — идём по страницам с задержкой
+// до конца выдачи каждого региона (полный сбор всех направлений).
 //
 // Реализует providers.Provider и отдаёт contract.Object — тот же формат, что VK.
 package glamping_rf
@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	// minObjects — целевой минимум уникальных объектов по ТЗ.
-	minObjects = 100
+	// estimatedObjects — ожидаемый объём полной базы (Подмосковье ~328 + Золотое
+	// кольцо ~47): стартовая ёмкость слайса, НЕ лимит сбора.
+	estimatedObjects = 400
 	// pageDelay — пауза между запросами страниц (вежливость к серверу, анти-бан).
 	pageDelay = 700 * time.Millisecond
 	// maxPagesPerPlace — предохранитель от бесконечной пагинации (328/40 ≈ 9 стр.).
@@ -33,11 +34,9 @@ type direction struct {
 	places []int
 }
 
-// defaultDirections — ДВА направления из ТЗ. Порядок намеренный: меньшее «Золотое
-// кольцо» раньше большого «Подмосковья» — чтобы к моменту ранней остановки по
-// minObjects оба направления уже были представлены в выборке. Регион = place-id
-// каталога (найдены при разведке: 49 — near-Moscow ~328, 75 — Ярославская обл.,
-// 68 — Тверская обл.).
+// defaultDirections — ДВА направления из ТЗ; каждое вычерпывается целиком
+// (полный сбор). Регион = place-id каталога (найдены при разведке:
+// 49 — near-Moscow ~328, 75 — Ярославская обл., 68 — Тверская обл.).
 var defaultDirections = []direction{
 	{name: "Золотое кольцо", places: []int{75, 68}},
 	{name: "Московская область", places: []int{49}},
@@ -47,7 +46,6 @@ var defaultDirections = []direction{
 type Provider struct {
 	fetcher    pageFetcher
 	directions []direction
-	minObjects int
 	delay      time.Duration
 }
 
@@ -56,7 +54,6 @@ func New() *Provider {
 	return &Provider{
 		fetcher:    newClient(),
 		directions: defaultDirections,
-		minObjects: minObjects,
 		delay:      pageDelay,
 	}
 }
@@ -70,26 +67,21 @@ type collected struct {
 	id  int
 }
 
-// Parse: фаза 1 — обход направлений/регионов, набор уникальных (по id) объектов
-// до minObjects; фаза 2 — обогащение каждого detail-страницей (описание, полная
-// галерея, заезд/выезд, правила из FAQ) + дефолты. Сбой обогащения одного
-// объекта не фатален — он остаётся с данными списка и дефолтами.
+// Parse: фаза 1 — ПОЛНЫЙ обход направлений/регионов до конца выдачи каждого,
+// набор уникальных (по id) объектов; фаза 2 — обогащение каждого
+// detail-страницей (описание, полная галерея, заезд/выезд, правила из FAQ) +
+// дефолты. Сбой обогащения одного объекта не фатален — он остаётся с данными
+// списка и дефолтами.
 func (p *Provider) Parse(ctx context.Context) ([]contract.Object, error) {
 	// [Go для изучения] map[int]bool — идиома «множество» (Set из JS): ключ есть →
 	// объект уже видели. make(slice, 0, cap) предвыделяет ёмкость: append не будет
-	// перевыделять память, пока не наберём minObjects элементов.
+	// перевыделять память в пределах ожидаемого объёма базы.
 	seen := make(map[int]bool)
-	items := make([]collected, 0, p.minObjects)
+	items := make([]collected, 0, estimatedObjects)
 
-collect:
 	for _, dir := range p.directions {
 		for _, place := range dir.places {
 			p.collectPlace(ctx, dir.name, place, seen, &items)
-			if len(items) >= p.minObjects {
-				slog.Info("glamping_rf: собрано достаточно",
-					"unique", len(items), "min", p.minObjects)
-				break collect
-			}
 			if ctx.Err() != nil {
 				// Отмена во время сбора: обогащать поздно — отдаём как есть.
 				return rawObjects(items), ctx.Err()
@@ -153,9 +145,9 @@ func (p *Provider) enrichOne(ctx context.Context, it *collected) bool {
 	return true
 }
 
-// collectPlace листает страницы одного региона (place), добавляя новые объекты в
-// out. Останавливается на конце выдачи, достижении minObjects, сбое страницы или
-// предохранителе maxPagesPerPlace. Сбой страницы не фатален — просто выходим.
+// collectPlace листает страницы одного региона (place) ДО КОНЦА выдачи,
+// добавляя новые объекты в out. Останавливается на конце выдачи, сбое страницы
+// или предохранителе maxPagesPerPlace. Сбой страницы не фатален — просто выходим.
 //
 // [Go для изучения] out *[]collected — указатель на слайс: append может
 // перевыделить внутренний массив, и без указателя вызывающий не увидел бы
@@ -183,7 +175,7 @@ func (p *Provider) collectPlace(ctx context.Context, direction string, place int
 			"direction", direction, "place", place, "page", page,
 			"items", len(resp.Items), "new", added, "unique_total", len(*out))
 
-		if !resp.HasMore || len(resp.Items) == 0 || len(*out) >= p.minObjects {
+		if !resp.HasMore || len(resp.Items) == 0 {
 			return
 		}
 		if !providers.SleepCtx(ctx, p.delay) {

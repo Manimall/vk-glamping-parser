@@ -29,7 +29,7 @@ import { searchTavily, extractWithOllama, mergeExtraction } from './lib/enrich.m
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const INPUT_FILE = resolve(ROOT, 'generated/glamping_rf/objects.json')
 const OUTPUT_FILE = resolve(ROOT, 'generated/glamping_rf/enriched_objects.json')
-const PAUSE_MS = 1200 // вежливая пауза между объектами (лимиты Tavily)
+const PAUSE_MS = 6000 // dev-тир Tavily жёстко режет частоту — щадящий темп
 const CHECKPOINT_EVERY = 5 // как часто сбрасывать прогресс на диск
 
 const log = {

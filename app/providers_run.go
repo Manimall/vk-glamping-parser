@@ -23,8 +23,10 @@ import (
 	vkprovider "vk-parser/providers/vk"
 )
 
-// providerTimeout — общий бюджет пакетного сбора (сеть + пагинация с задержками).
-const providerTimeout = 10 * time.Minute
+// providerTimeout — общий бюджет пакетного сбора (сеть + пагинация с
+// задержками). Рассчитан на ПОЛНУЮ базу glamping_rf (~375 объектов ≈ 375
+// detail-страниц с вежливыми паузами ≈ 12-15 мин) с запасом.
+const providerTimeout = 30 * time.Minute
 
 // selectProvider — фабрика: имя из CLI → конкретная реализация Provider. Здесь
 // (и только здесь) main знает про конкретные пакеты; дальше — работа через интерфейс.

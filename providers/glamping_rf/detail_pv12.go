@@ -32,6 +32,14 @@ type pv12Amenity struct {
 // Требуем ≥3 цифр — иначе ловит «до 4х», «2 часа». Первое совпадение — цена.
 var priceRe = regexp.MustCompile(`(\d[\d\s]{2,}|\d{3,})\s*(?:₽|руб|р\b|р/)`)
 
+// hourlyTailWindow — сколько символов после суммы смотрим в поисках «час»
+// («1200 руб. в час», «5000 рублей в час»): дальше по тексту слово «час» уже
+// не относится к цене.
+const hourlyTailWindow = 20
+
+// hourlyRe — признак почасовой цены в хвосте сразу после суммы.
+var hourlyRe = regexp.MustCompile(`(?i)[в/]\s*час`)
+
 // detailPaidExtras — платные услуги объекта из window.pv12RoomDetails:
 // собираем помеченные paid (дедуп по имени), цена — из описания.
 func detailPaidExtras(page string) []extract.Extra {
@@ -58,17 +66,23 @@ func detailPaidExtras(page string) []extract.Extra {
 	return extras
 }
 
-// priceFromDesc — цена доп.услуги из её описания в формате «N ₽» (как у списка).
-// Нет распознаваемой цены — пустая строка (услуга покажется без суммы).
+// priceFromDesc — цена доп.услуги из её описания: «N ₽» (как у списка) либо
+// «N ₽/час» для почасовых («1200 руб. в час»). Честность прайса: почасовую
+// нельзя выдавать за цену «за всё» — гость решит, что баня стоит 1 200 ₽,
+// а реально «минимум 3 часа». Нет распознаваемой цены — пустая строка.
 func priceFromDesc(desc string) string {
-	m := priceRe.FindStringSubmatch(desc)
-	if m == nil {
+	loc := priceRe.FindStringSubmatchIndex(desc)
+	if loc == nil {
 		return ""
 	}
-	digits := strings.ReplaceAll(m[1], " ", "")
+	digits := strings.ReplaceAll(desc[loc[2]:loc[3]], " ", "")
 	n, err := strconv.Atoi(digits)
 	if err != nil || n <= 0 {
 		return ""
+	}
+	tail := desc[loc[1]:min(len(desc), loc[1]+hourlyTailWindow)]
+	if hourlyRe.MatchString(tail) {
+		return formatRub(n) + "/час"
 	}
 	return formatRub(n)
 }

@@ -36,6 +36,14 @@ func mergeDetail(obj *contract.Object, d *detailData) {
 	if len(d.Photos) > 0 {
 		obj.Photos = d.Photos // полная галерея вместо 4 превью списка
 	}
+	if len(d.Extras) > 0 {
+		obj.Extras = d.Extras // платные услуги (баня/чан/питомец) с ценой
+	}
+	// Точная точка объекта из placemark карты перекрывает координаты списка
+	// (те часто указывают на центр города — метка «уезжает» от объекта).
+	if d.Lat != 0 && d.Lng != 0 {
+		obj.Coords = &contract.Coords{Lat: d.Lat, Lon: d.Lng}
+	}
 	if len(obj.Cabins) == 0 {
 		return
 	}

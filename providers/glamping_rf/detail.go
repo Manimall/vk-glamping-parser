@@ -19,6 +19,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"vk-parser/internal/extract"
 )
 
 // errDetailGone — detail-страница отдала 404: объект СНЯТ с каталога-источника.
@@ -44,10 +46,26 @@ type detailData struct {
 	Rating      string // «5.0»
 	Reviews     int
 	Photos      []string
-	Amenities   []string // категории amenityFeature
-	Rules       []string // правила из FAQ (очищенный текст)
-	Guests      int      // вместимость: базовые + доп. места
-	Area        string   // «80 м²»
+	Amenities   []string        // категории amenityFeature
+	Extras      []extract.Extra // платные услуги (баня/чан/питомец) с ценой
+	Rules       []string        // правила из FAQ (очищенный текст)
+	Guests      int             // вместимость: базовые + доп. места
+	Area        string          // «80 м²»
+	Lat         float64         // точная точка объекта из placemark карты
+	Lng         float64
+}
+
+// pv12Room — домик из window.pv12RoomDetails: специфика + удобства с пометкой
+// платности. Платные удобства — источник доп.услуг (баня/чан), которые гость
+// может заказать и увеличить чек.
+type pv12Room struct {
+	Amenities []pv12Amenity `json:"amenities"`
+}
+
+type pv12Amenity struct {
+	Name string `json:"name"`
+	Paid bool   `json:"paid"`
+	Desc string `json:"desc"` // текст с ценой: «Доплата 1500р/питомец»
 }
 
 // ldJSONRe вырезает содержимое <script type="application/ld+json">.
@@ -146,7 +164,134 @@ func parseDetailHTML(page string, id int) *detailData {
 		d.Guests = base + extra
 	}
 	d.Area = detailArea(page)
+	d.Extras = detailPaidExtras(page)
+	if lat, lng, ok := detailPlacemark(page); ok {
+		d.Lat, d.Lng = lat, lng
+	}
 	return d
+}
+
+// placemarkRe — точная точка объекта на Яндекс-карте страницы:
+// `new ymaps.Placemark([56.773469, 38.874880], …)`. Именно её показывает
+// источник (точнее координат списка, часто указывающих на центр города).
+var placemarkRe = regexp.MustCompile(`Placemark\(\s*\[\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\]`)
+
+// detailPlacemark — координаты метки объекта из карты страницы (lat, lng).
+func detailPlacemark(page string) (lat, lng float64, ok bool) {
+	m := placemarkRe.FindStringSubmatch(page)
+	if m == nil {
+		return 0, 0, false
+	}
+	lat, err1 := strconv.ParseFloat(m[1], 64)
+	lng, err2 := strconv.ParseFloat(m[2], 64)
+	if err1 != nil || err2 != nil || lat == 0 || lng == 0 {
+		return 0, 0, false
+	}
+	return lat, lng, true
+}
+
+// priceRe — цена из описания услуги: «5000 рублей», «1500р», «3 000 ₽».
+// Требуем ≥3 цифр — иначе ловит «до 4х», «2 часа». Первое совпадение — цена.
+var priceRe = regexp.MustCompile(`(\d[\d\s]{2,}|\d{3,})\s*(?:₽|руб|р\b|р/)`)
+
+// priceFromDesc — цена доп.услуги из её описания в формате «N ₽» (как у списка).
+// Нет распознаваемой цены — пустая строка (услуга покажется без суммы).
+func priceFromDesc(desc string) string {
+	m := priceRe.FindStringSubmatch(desc)
+	if m == nil {
+		return ""
+	}
+	digits := strings.ReplaceAll(m[1], " ", "")
+	n, err := strconv.Atoi(digits)
+	if err != nil || n <= 0 {
+		return ""
+	}
+	return formatRub(n)
+}
+
+// formatRub — цена в стиле сайта: «5 000 ₽» (пробел-разделитель тысяч).
+func formatRub(n int) string {
+	s := strconv.Itoa(n)
+	var b strings.Builder
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(c)
+	}
+	b.WriteString(" ₽")
+	return b.String()
+}
+
+// roomDetailsMarker — начало встроенного JSON с домиками и их удобствами.
+const roomDetailsMarker = "window.pv12RoomDetails ="
+
+// detailPaidExtras — платные услуги объекта (баня/чан/питомец) из
+// window.pv12RoomDetails: у каждого домика есть amenities c пометкой paid и
+// описанием, где указана цена. Собираем платные, дедуп по имени, цена — из
+// описания. Это те самые доп.услуги, которые гость может заказать (растят чек).
+func detailPaidExtras(page string) []extract.Extra {
+	raw := balancedJSON(page, roomDetailsMarker, '{', '}')
+	if raw == "" {
+		return nil
+	}
+	var rooms map[string]pv12Room
+	if err := json.Unmarshal([]byte(raw), &rooms); err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var extras []extract.Extra
+	for _, room := range rooms {
+		for _, a := range room.Amenities {
+			name := html.UnescapeString(strings.TrimSpace(a.Name))
+			if !a.Paid || name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			extras = append(extras, extract.Extra{Name: name, Price: priceFromDesc(a.Desc)})
+		}
+	}
+	return extras
+}
+
+// balancedJSON вырезает первый сбалансированный литерал (объект/массив) после
+// marker, честно пропуская скобки внутри строк и экранирование. Пусто — если
+// marker не найден или скобки не сошлись.
+func balancedJSON(page, marker string, open, close byte) string {
+	i := strings.Index(page, marker)
+	if i < 0 {
+		return ""
+	}
+	start := strings.IndexByte(page[i:], open)
+	if start < 0 {
+		return ""
+	}
+	start += i
+	depth, inStr, esc := 0, false, false
+	for k := start; k < len(page); k++ {
+		c := page[k]
+		switch {
+		case inStr:
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+		case c == open:
+			depth++
+		case c == close:
+			depth--
+			if depth == 0 {
+				return page[start : k+1]
+			}
+		}
+	}
+	return ""
 }
 
 // detailArea — площадь объекта из характеристик страницы. У комплекса несколько

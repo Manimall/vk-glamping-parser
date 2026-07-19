@@ -73,6 +73,61 @@ func TestParseDetailHTML(t *testing.T) {
 	}
 }
 
+func TestPriceFromDesc(t *testing.T) {
+	cases := map[string]string{
+		"Доплата 1500р/питомец":                       "1 500 ₽",
+		"Баня бочка до 4х человек-5000 рублей в час":   "5 000 ₽",
+		"Доплата 3000 рублей до 3 кг собачки":          "3 000 ₽",
+		"запуск с июля месяца":                         "",
+		"до 4х человек":                                "", // «4х» — не цена (мало цифр)
+	}
+	for desc, want := range cases {
+		if got := priceFromDesc(desc); got != want {
+			t.Errorf("priceFromDesc(%q) = %q, ожидал %q", desc, got, want)
+		}
+	}
+}
+
+func TestDetailPaidExtras(t *testing.T) {
+	page := `<script>window.pv12RoomDetails = {
+		"5996":{"name":"Дом 1","amenities":[
+			{"name":"Кондиционер","paid":false,"desc":""},
+			{"name":"Можно с Питомцем","paid":true,"desc":"Доплата 1500 рублей"},
+			{"name":"Баня","paid":true,"desc":"5000 рублей в час"}
+		]},
+		"5997":{"name":"Дом 2","amenities":[
+			{"name":"Баня","paid":true,"desc":"5000 рублей в час"},
+			{"name":"Горячий чан","paid":true,"desc":"запуск с июля"}
+		]}
+	};</script>`
+	extras := detailPaidExtras(page)
+	// Дедуп по имени: Питомец, Баня, Чан — «Кондиционер» (не платный) отброшен.
+	if len(extras) != 3 {
+		t.Fatalf("услуг = %d, ожидал 3: %+v", len(extras), extras)
+	}
+	byName := map[string]string{}
+	for _, e := range extras {
+		byName[e.Name] = e.Price
+	}
+	if byName["Можно с Питомцем"] != "1 500 ₽" || byName["Баня"] != "5 000 ₽" {
+		t.Errorf("цены услуг неверны: %+v", byName)
+	}
+	if _, ok := byName["Горячий чан"]; !ok || byName["Горячий чан"] != "" {
+		t.Errorf("чан без цены должен быть с пустой ценой: %+v", byName)
+	}
+}
+
+func TestDetailPlacemark(t *testing.T) {
+	page := `var map; map.geoObjects.add(new ymaps.Placemark([56.773469, 38.874880], {}));`
+	lat, lng, ok := detailPlacemark(page)
+	if !ok || lat != 56.773469 || lng != 38.874880 {
+		t.Errorf("placemark = (%.6f, %.6f, %v), ожидал (56.773469, 38.874880, true)", lat, lng, ok)
+	}
+	if _, _, ok := detailPlacemark(`<div>без карты</div>`); ok {
+		t.Error("нет placemark → ok=false")
+	}
+}
+
 func TestDetailArea(t *testing.T) {
 	cases := []struct {
 		name string

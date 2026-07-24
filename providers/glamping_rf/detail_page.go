@@ -27,7 +27,10 @@ var areaAltRe = regexp.MustCompile(`alt="Площадь">\s*(\d+)\s*м`)
 // descFullRe — блок ПОЛНОГО описания в вёрстке (data-pv12-desc-full). В ld+json
 // LodgingBusiness сайт кладёт обрезанные ~300 символов (meta-описание) — полный
 // текст объекта есть только в этом блоке. (?s) — текст многострочный.
-var descFullRe = regexp.MustCompile(`(?s)data-pv12-desc-full[^>]*>(.*?)</div>`)
+// Якорь `<div` обязателен: без него маркер матчился как СТРОКА в JS
+// (querySelectorAll('[data-pv12-desc-full]') в скрипте тогглера) и в about
+// уезжал захваченный код — страницы 1915/618 вовсе без desc-блока.
+var descFullRe = regexp.MustCompile(`(?s)<div[^>]*data-pv12-desc-full[^>]*>(.*?)</div>`)
 
 // placemarkRe — точная точка объекта на Яндекс-карте страницы:
 // `new ymaps.Placemark([56.773469, 38.874880], …)`. Именно её показывает
@@ -40,7 +43,9 @@ var placemarkRe = regexp.MustCompile(`Placemark\(\s*\[\s*([-\d.]+)\s*,\s*([-\d.]
 // (останется описание из ld+json).
 func fullDescription(page string) string {
 	for _, m := range descFullRe.FindAllStringSubmatch(page, -1) {
-		text := html.UnescapeString(tagRe.ReplaceAllString(m[1], " "))
+		// Скрипты/стили — целиком до снятия тегов, иначе их код становится текстом.
+		clean := scriptRe.ReplaceAllString(m[1], " ")
+		text := html.UnescapeString(tagRe.ReplaceAllString(clean, " "))
 		text = strings.TrimSpace(spacesRe.ReplaceAllString(text, " "))
 		if text != "" {
 			return text

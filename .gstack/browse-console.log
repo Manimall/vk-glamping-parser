@@ -1,0 +1,60 @@
+[2026-07-07T10:59:55.498Z] [error] Кажется, в children передан компонент, который не поддерживает свойство getRootRef. Мы не можем получить ссылку на корневой dom-элемент этого компонента
+[2026-07-07T10:59:55.586Z] [error] .reset in derived store is deprecated, use .reset in store created via createStore instead
+[2026-07-07T10:59:56.010Z] [error] m: Api request failed.
+    at g (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:924635)
+    at je.loadPrefetchCache (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:1036727)
+    at a.getMembers (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:2032001)
+    at async d.fetchGroupsMembersById (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/2860.710648e8.js:1:173784)
+    at async d.ensureFetch (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/2860.710648e8.js:1:173631)
+    at async [init] (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/pageCommunityPage.f72f7d99.js:1:161640)
+    at async https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:1881261
+[2026-07-07T10:59:56.010Z] [error] m: Api request failed.
+    at g (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:924635)
+    at je.loadPrefetchCache (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:1036727)
+    at a.getMembers (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:2032001)
+    at async d.fetchGroupsMembersById (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/2860.710648e8.js:1:173784)
+    at async d.ensureFetch (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/2860.710648e8.js:1:173631)
+    at async Promise.all (index 2)
+    at async gs.ensureMembers (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/pageCommunityPage.f72f7d99.js:1:173151)
+[2026-07-07T10:59:56.568Z] [log] [0.01]  common module enabled
+[2026-07-07T10:59:57.337Z] [warning] [GroupMarkerNotSet(crbug.com/242999)!:A0D01E0004010000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+[2026-07-07T10:59:57.338Z] [warning] [.WebGL-0x13c09a77e00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+[2026-07-07T10:59:57.339Z] [warning] [GroupMarkerNotSet(crbug.com/242999)!:A0A01E0004010000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+[2026-07-07T10:59:57.339Z] [warning] [.WebGL-0x13c09a77800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+[2026-07-07T10:59:57.339Z] [warning] [.WebGL-0x13c09a77800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+[2026-07-07T10:59:57.339Z] [warning] [GroupMarkerNotSet(crbug.com/242999)!:A0803B0B04010000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+[2026-07-07T10:59:57.339Z] [warning] [.WebGL-0x13c017b6e00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)
+[2026-07-07T10:59:57.339Z] [warning] [GroupMarkerNotSet(crbug.com/242999)!:A0B03B0B04010000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+[2026-07-07T10:59:57.916Z] [error] Failed to load resource: the server responded with a status of 403 ()
+[2026-07-07T11:00:26.598Z] [error] Failed to load resource: net::ERR_TIMED_OUT
+[2026-07-07T11:00:26.598Z] [error] Failed to load resource: net::ERR_TIMED_OUT
+[2026-07-07T11:00:31.598Z] [error] Failed to load resource: net::ERR_TIMED_OUT
+[2026-07-07T11:00:41.645Z] [error] Failed to load resource: the server responded with a status of 403 ()
+[2026-07-07T11:01:25.336Z] [error] Кажется, в children передан компонент, который не поддерживает свойство getRootRef. Мы не можем получить ссылку на корневой dom-элемент этого компонента
+[2026-07-07T11:01:25.345Z] [error] .reset in derived store is deprecated, use .reset in store created via createStore instead
+[2026-07-07T11:01:25.640Z] [error] m: Api request failed.
+    at g (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:924635)
+    at je.loadPrefetchCache (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:1036727)
+    at a.getMembers (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:2032001)
+    at async d.fetchGroupsMembersById (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/2860.710648e8.js:1:173784)
+    at async d.ensureFetch (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/2860.710648e8.js:1:173631)
+    at async [init] (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/pageCommunityPage.f72f7d99.js:1:161640)
+    at async https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:1881261
+[2026-07-07T11:01:25.640Z] [error] m: Api request failed.
+    at g (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:924635)
+    at je.loadPrefetchCache (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:1036727)
+    at a.getMembers (https://st1-22.vk.com/dist/projects/vk-web/entrypoints/core_spa.e1293566.js:2:2032001)
+    at async d.fetchGroupsMembersById (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/2860.710648e8.js:1:173784)
+    at async d.ensureFetch (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/2860.710648e8.js:1:173631)
+    at async Promise.all (index 2)
+    at async gs.ensureMembers (https://st1-22.vk.com/dist/projects/vk-web/chunks/js/pageCommunityPage.f72f7d99.js:1:173151)
+[2026-07-07T11:01:26.182Z] [log] [0.01]  common module enabled
+[2026-07-07T11:01:27.442Z] [warning] [GroupMarkerNotSet(crbug.com/242999)!:A0A01E0004010000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+[2026-07-07T11:01:27.442Z] [warning] [GroupMarkerNotSet(crbug.com/242999)!:A0D01E0004010000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+[2026-07-07T11:01:27.442Z] [warning] [GroupMarkerNotSet(crbug.com/242999)!:A0803B0B04010000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+[2026-07-07T11:01:27.442Z] [warning] [GroupMarkerNotSet(crbug.com/242999)!:A0B03B0B04010000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader (about:flags#enable-unsafe-swiftshader) flag to opt in to lower security guarantees for trusted content.
+[2026-07-07T11:01:27.474Z] [error] Failed to load resource: the server responded with a status of 403 ()
+[2026-07-07T11:01:55.925Z] [error] Failed to load resource: net::ERR_TIMED_OUT
+[2026-07-07T11:01:55.925Z] [error] Failed to load resource: net::ERR_TIMED_OUT
+[2026-07-07T11:02:00.847Z] [error] Failed to load resource: net::ERR_TIMED_OUT
+[2026-07-07T11:02:10.885Z] [error] Failed to load resource: the server responded with a status of 403 ()

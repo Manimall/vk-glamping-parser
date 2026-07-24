@@ -51,6 +51,12 @@ type detailData struct {
 // tagRe счищает HTML-теги из текстов (описание, FAQ).
 var tagRe = regexp.MustCompile(`<[^>]+>`)
 
+// scriptRe вырезает инлайн-скрипты/стили ЦЕЛИКОМ (с содержимым) до снятия
+// тегов: tagRe убирает только сами теги, и JS-код внутри <script> становился
+// «текстом» описания (баг объектов 1915/618 — обрывок шаблонизатора галереи
+// «r.images.forEach…» уехал в about, SEO и карточку сайта).
+var scriptRe = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(script|style)>`)
+
 // spacesRe — схлопывание пробельных последовательностей в один пробел.
 var spacesRe = regexp.MustCompile(`\s+`)
 

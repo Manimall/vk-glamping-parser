@@ -22,7 +22,7 @@ const (
 	// результат кэшируется выше по стеку).
 	nominatimBaseURL = "https://nominatim.openstreetmap.org/search"
 	// userAgent обязателен по правилам Nominatim — иначе банят по запросам.
-	userAgent = "vk-glamping-parser/1.0 (iv-iframes aggregator)"
+	userAgent = "vk-glamping-parser/1.0 (aframedomik.ru aggregator)"
 	// resultLimit — берём только лучший результат.
 	resultLimit = "1"
 	// httpTimeout — таймаут запроса к геокодеру.

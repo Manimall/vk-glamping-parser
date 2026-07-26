@@ -19,7 +19,7 @@ const (
 	// ajaxHeader/ajaxValue — без них сервер отдаёт HTML-страницу, а не JSON.
 	ajaxHeader  = "X-Requested-With"
 	ajaxValue   = "XMLHttpRequest"
-	userAgent   = "Mozilla/5.0 (compatible; iv-iframes-bot/1.0; +https://iv-iframes.vercel.app)"
+	userAgent   = "Mozilla/5.0 (compatible; aframedomik-bot/1.0; +https://aframedomik.ru)"
 	httpTimeout = 20 * time.Second
 )
 

@@ -17,7 +17,12 @@ const amenitiesGroupTitle = "Удобства"
 // Чистая функция: тестируется без сети.
 func toObject(it apiItem) contract.Object {
 	title := firstNonEmpty(it.NameNew, it.Name)
-	location := buildLocation(it.Place.Name, it.City.City)
+	// Тримим ОДИН раз и здесь: поля контракта и строка показа обязаны
+	// получиться из одних и тех же значений, иначе на данных с лишними
+	// пробелами они разъедутся.
+	region := strings.TrimSpace(it.Place.Name)
+	nearCity := strings.TrimSpace(it.City.City)
+	location := buildLocation(region, nearCity)
 	photos := collectPhotos(it)
 
 	obj := contract.Object{
@@ -26,10 +31,18 @@ func toObject(it apiItem) contract.Object {
 		Slug:     slug.Make(fmt.Sprintf("%s %d", title, it.ID)),
 		Title:    title,
 		Location: location,
-		Contact:  strings.TrimSpace(it.Telephone),
-		MapURL:   strings.TrimSpace(it.Website),
-		Cover:    firstNonEmpty(it.ThumbMain.SrcWebp, it.ThumbMain.Src),
-		Photos:   photos,
+		Region:   region,
+		NearCity: nearCity,
+		// Locality не заполняем. В списочном ответе источника нет ни одного
+		// адресного поля (26 ключей объекта), а City — точка отсчёта расстояния,
+		// а не место объекта: у 203 подмосковных глэмпингов там стоит «Москва».
+		// Настоящий населённый пункт источник отдаёт только в разметке
+		// detail-страницы, свободным текстом и противоречиво — это отдельная
+		// задача со своей политикой разбора, а не догадка на ходу.
+		Contact: strings.TrimSpace(it.Telephone),
+		MapURL:  strings.TrimSpace(it.Website),
+		Cover:   firstNonEmpty(it.ThumbMain.SrcWebp, it.ThumbMain.Src),
+		Photos:  photos,
 		Cabins: []contract.Cabin{{
 			Title: title,
 			Price: it.Price.Formatted,
@@ -52,10 +65,18 @@ func toObject(it apiItem) contract.Object {
 	return obj
 }
 
-// buildLocation склеивает регион и город (если задан) в одну строку локации.
-func buildLocation(place, city string) string {
+// buildLocation склеивает регион и опорный город в одну строку ДЛЯ ПОКАЗА.
+// Обе части ждёт уже отримленными — это делает вызывающий, чтобы поля контракта
+// и строка показа гарантированно получились из одних и тех же значений.
+//
+// Формат намеренно не меняется: на этой строке висят SEO-тексты объектов и
+// поиск бота (гость пишет «Москва» и ждёт подмосковные варианты). Структура
+// теперь доступна отдельными полями — Region/NearCity, — а укорачивание
+// строки до региона возможно только после того, как потребители на них
+// перейдут.
+func buildLocation(region, nearCity string) string {
 	parts := make([]string, 0, 2)
-	for _, p := range []string{strings.TrimSpace(place), strings.TrimSpace(city)} {
+	for _, p := range []string{region, nearCity} {
 		if p != "" {
 			parts = append(parts, p)
 		}

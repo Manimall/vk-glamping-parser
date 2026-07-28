@@ -14,7 +14,11 @@ func sampleItem() apiItem {
 		ThumbMain: apiThumb{SrcWebp: "https://s/cover.webp"},
 		Price:     apiPrice{Value: 7360, Formatted: "7 360 ₽", Per: "night"},
 		Place:     apiPlace{ID: 70, Name: "Тульская область"},
-		City:      apiCity{City: "Ильино"},
+		// Живой API отдаёт для id=959 city:null. «Ильино» здесь стояло по ошибке
+		// и создавало ложное впечатление, будто city — населённый пункт объекта:
+		// по такой фикстуре любой ревьюер сделал бы неверный вывод. Деревня
+		// Ильино существует, но приходит из разметки detail-страницы, а не отсюда.
+		City:      apiCity{},
 		Lat:       54.355987,
 		Lng:       37.362846,
 		Services:  []apiService{{ID: 11, Name: "Можно с питомцем"}, {ID: 61, Name: "Баня"}},
@@ -29,8 +33,17 @@ func TestToObject_Mapping(t *testing.T) {
 	if o.Title != "Деревня Ильино" { // name_new приоритетнее name
 		t.Fatalf("title=%q, ожидал name_new", o.Title)
 	}
-	if o.Location != "Тульская область, Ильино" {
+	if o.Location != "Тульская область" {
 		t.Fatalf("location=%q", o.Location)
+	}
+	if o.Region != "Тульская область" {
+		t.Fatalf("region=%q", o.Region)
+	}
+	if o.NearCity != "" {
+		t.Fatalf("nearCity=%q, источник города не дал", o.NearCity)
+	}
+	if o.Locality != "" {
+		t.Fatalf("locality=%q, населённый пункт из списочного API не берётся", o.Locality)
 	}
 	if o.Coords == nil || o.Coords.Lat != 54.355987 || o.Coords.Lon != 37.362846 {
 		t.Fatalf("coords=%+v (Lng должен маппиться в Lon)", o.Coords)
@@ -54,6 +67,39 @@ func TestToObject_Mapping(t *testing.T) {
 	}
 }
 
+// Гард на исходный баг: опорный город направления НЕ должен попадать в
+// населённый пункт объекта. Данные подлинные — объект 1586 стоит в Ярославской
+// области, а источник помечает его городом «Москва» (это точка отсчёта: рядом
+// в ответе highway «Ярославское» и 154 км от МКАД). Именно такие карточки
+// уводили поисковик в неверный город.
+//
+// Тест обязан покраснеть в ту секунду, когда кто-то решит «город же есть,
+// положим его в Locality».
+func TestToObject_HubCityIsNotLocality(t *testing.T) {
+	it := sampleItem()
+	it.ID = 1586
+	it.Place = apiPlace{ID: 75, Name: "Ярославская область"}
+	it.City = apiCity{City: "Москва", Highway: "Ярославское"}
+
+	o := toObject(it)
+
+	if o.Locality != "" {
+		t.Fatalf("locality=%q — опорный город выдан за адрес объекта", o.Locality)
+	}
+	if o.Region != "Ярославская область" {
+		t.Fatalf("region=%q", o.Region)
+	}
+	if o.NearCity != "Москва" {
+		t.Fatalf("nearCity=%q", o.NearCity)
+	}
+	// Гард совместимости: строка показа менять формат не должна, пока сайт и
+	// бот не перешли на раздельные поля. На ней держатся SEO-тексты и поиск
+	// бота по названию города.
+	if o.Location != "Ярославская область, Москва" {
+		t.Fatalf("location=%q — формат строки показа изменился", o.Location)
+	}
+}
+
 func TestCollectPhotos_FallbackToThumb(t *testing.T) {
 	it := apiItem{ThumbMain: apiThumb{SrcWebp: "https://s/cover.webp"}} // images пусты
 	got := collectPhotos(it)
@@ -66,7 +112,27 @@ func TestBuildLocation(t *testing.T) {
 	if got := buildLocation("Тверская область", ""); got != "Тверская область" {
 		t.Fatalf("без города: %q", got)
 	}
-	if got := buildLocation("  ", "Мышкин"); got != "Мышкин" {
+	if got := buildLocation("", "Мышкин"); got != "Мышкин" {
 		t.Fatalf("пустой регион: %q", got)
+	}
+}
+
+// Трим делает toObject, и делает его один раз — иначе поле контракта Region
+// и строка показа Location разъедутся на данных с лишними пробелами.
+func TestToObject_TrimsAddressOnce(t *testing.T) {
+	it := sampleItem()
+	it.Place = apiPlace{ID: 49, Name: "  Московская область "}
+	it.City = apiCity{City: " Москва  "}
+
+	o := toObject(it)
+
+	if o.Region != "Московская область" {
+		t.Errorf("region=%q", o.Region)
+	}
+	if o.NearCity != "Москва" {
+		t.Errorf("nearCity=%q", o.NearCity)
+	}
+	if o.Location != "Московская область, Москва" {
+		t.Errorf("location=%q", o.Location)
 	}
 }

@@ -31,29 +31,58 @@ type Cabin struct {
 // галерея) + список домиков. Единый JSON-контракт для фронта. omitempty убирает
 // поля, которых нет.
 type Object struct {
-	Slug     string          `json:"slug,omitempty"`     // URL-идентификатор (/api/v1/glampings/<slug>)
-	Title    string          `json:"title,omitempty"`    // название объекта
-	About    string          `json:"about,omitempty"`    // описание
-	Location string          `json:"location,omitempty"` // адрес/город/регион
-	Coords   *Coords         `json:"coords,omitempty"`   // координаты (если есть)
-	MapURL   string          `json:"mapUrl,omitempty"`   // ссылка на карту
-	Contact  string          `json:"contact,omitempty"`  // телефон/контакт
-	Cover    string          `json:"cover,omitempty"`    // обложка-превью (карточка главной, OG)
-	Photos   []string        `json:"photos"`             // галерея (URL кадров)
-	Cabins   []Cabin         `json:"cabins"`             // домики с удобствами
-	Extras   []extract.Extra `json:"extras,omitempty"`   // доп.услуги объекта
-	Seo      *extract.SEO    `json:"seo,omitempty"`      // SEO/OG-тексты (без бренда фронта)
+	Slug  string `json:"slug,omitempty"`  // URL-идентификатор (/api/v1/glampings/<slug>)
+	Title string `json:"title,omitempty"` // название объекта
+	About string `json:"about,omitempty"` // описание
+
+	// Location — человекочитаемая строка ДЛЯ ПОКАЗА. Разбирать её обратно на
+	// составляющие нельзя: для этого есть Region/Locality/NearCity ниже.
+	// Искать по ней подстрокой можно — запрет только на разбор.
+	//
+	// Именно разбор этой строки и был багом: у glamping_rf она склеена как
+	// «регион, опорный город», и потребители принимали второе за адрес объекта.
+	Location string `json:"location,omitempty"`
+
+	// Region — регион/направление верхнего уровня, как его называет источник.
+	// НЕ гарантированно субъект РФ: у глэмпинги.рф встречаются «Архыз
+	// (Карачаево-Черкесия)» и «Абхазия». Гарантия ровно одна, и её достаточно —
+	// это никогда не населённый пункт.
+	Region string `json:"region,omitempty"`
+
+	// Locality — населённый пункт САМОГО объекта. Заполняется, только если
+	// источник его действительно сообщил: ни регион, ни опорный город, ни шоссе
+	// населённым пунктом не считаются. Пустое поле честнее чужого города —
+	// потребитель тогда не покажет ничего вместо неверного.
+	Locality string `json:"locality,omitempty"`
+
+	// NearCity — опорный город направления, точка ОТКУДА ехать, а не адрес.
+	// Почему это именно точка отсчёта и чем доказано — см. комментарий к
+	// apiCity в providers/glamping_rf/types.go.
+	NearCity string `json:"nearCity,omitempty"`
+
+	Coords  *Coords         `json:"coords,omitempty"`  // координаты (если есть)
+	MapURL  string          `json:"mapUrl,omitempty"`  // ссылка на карту
+	Contact string          `json:"contact,omitempty"` // телефон/контакт
+	Cover   string          `json:"cover,omitempty"`   // обложка-превью (карточка главной, OG)
+	Photos  []string        `json:"photos"`            // галерея (URL кадров)
+	Cabins  []Cabin         `json:"cabins"`            // домики с удобствами
+	Extras  []extract.Extra `json:"extras,omitempty"`  // доп.услуги объекта
+	Seo     *extract.SEO    `json:"seo,omitempty"`     // SEO/OG-тексты (без бренда фронта)
 }
 
 // Preview — облегчённая карточка для списков (главная страница каталога):
 // только то, что нужно отрисовать плитку — без галереи, удобств и правил.
 type Preview struct {
-	Slug     string       `json:"slug"`
-	Title    string       `json:"title"`
-	Location string       `json:"location,omitempty"`
-	Cover    string       `json:"cover,omitempty"`
-	Price    string       `json:"price,omitempty"` // цена первого домика («7 000 ₽»)
-	Seo      *extract.SEO `json:"seo,omitempty"`   // OG-тексты для шаринга ссылки
+	Slug     string `json:"slug"`
+	Title    string `json:"title"`
+	Location string `json:"location,omitempty"`
+	// Region — ось группировки: по нему фильтруется каталог и работает мастер
+	// подбора бота. Locality/NearCity в плитку не кладём — они нужны только на
+	// карточке объекта, а Preview намеренно облегчённый.
+	Region string       `json:"region,omitempty"`
+	Cover  string       `json:"cover,omitempty"`
+	Price  string       `json:"price,omitempty"` // цена первого домика («7 000 ₽»)
+	Seo    *extract.SEO `json:"seo,omitempty"`   // OG-тексты для шаринга ссылки
 }
 
 // ToPreview собирает превью из полной карточки (цена — у первого домика).
@@ -63,7 +92,7 @@ type Preview struct {
 // (чистое преобразование). Указательный ресивер (o *Object) брали бы для
 // мутаций или чтобы не копировать крупную структуру.
 func (o Object) ToPreview() Preview {
-	p := Preview{Slug: o.Slug, Title: o.Title, Location: o.Location, Cover: o.Cover, Seo: o.Seo}
+	p := Preview{Slug: o.Slug, Title: o.Title, Location: o.Location, Region: o.Region, Cover: o.Cover, Seo: o.Seo}
 	if len(o.Cabins) > 0 {
 		p.Price = o.Cabins[0].Price
 	}

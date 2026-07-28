@@ -17,9 +17,6 @@ const amenitiesGroupTitle = "Удобства"
 // Чистая функция: тестируется без сети.
 func toObject(it apiItem) contract.Object {
 	title := firstNonEmpty(it.NameNew, it.Name)
-	// Тримим ОДИН раз и здесь: поля контракта и строка показа обязаны
-	// получиться из одних и тех же значений, иначе на данных с лишними
-	// пробелами они разъедутся.
 	region := strings.TrimSpace(it.Place.Name)
 	nearCity := strings.TrimSpace(it.City.City)
 	location := buildLocation(region, nearCity)
@@ -33,12 +30,11 @@ func toObject(it apiItem) contract.Object {
 		Location: location,
 		Region:   region,
 		NearCity: nearCity,
-		// Locality не заполняем. В списочном ответе источника нет ни одного
-		// адресного поля (26 ключей объекта), а City — точка отсчёта расстояния,
-		// а не место объекта: у 203 подмосковных глэмпингов там стоит «Москва».
-		// Настоящий населённый пункт источник отдаёт только в разметке
-		// detail-страницы, свободным текстом и противоречиво — это отдельная
-		// задача со своей политикой разбора, а не догадка на ходу.
+		// Locality не заполняем: в списочном ответе источника адресных полей нет
+		// вовсе, а City — точка отсчёта расстояния (см. apiCity в types.go).
+		// Настоящий населённый пункт лежит только в разметке detail-страницы,
+		// свободным текстом и противоречиво — это отдельная задача со своей
+		// политикой разбора, а не догадка на ходу.
 		Contact: strings.TrimSpace(it.Telephone),
 		MapURL:  strings.TrimSpace(it.Website),
 		Cover:   firstNonEmpty(it.ThumbMain.SrcWebp, it.ThumbMain.Src),

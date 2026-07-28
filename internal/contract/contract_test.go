@@ -2,7 +2,6 @@ package contract
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -17,8 +16,14 @@ func TestObject_JSON_OmitsEmptyAddressFields(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Проверяем ключи, а не подстроки: слово «region» может однажды оказаться
+	// внутри title или about, и поиск по тексту покраснел бы на валидных данных.
 	for _, key := range []string{"region", "locality", "nearCity"} {
-		if strings.Contains(string(raw), key) {
+		if _, ok := got[key]; ok {
 			t.Errorf("пустое поле %q попало в JSON: %s", key, raw)
 		}
 	}

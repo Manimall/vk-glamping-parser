@@ -35,6 +35,16 @@ func toObject(it apiItem) contract.Object {
 		// Настоящий населённый пункт лежит только в разметке detail-страницы,
 		// свободным текстом и противоречиво — это отдельная задача со своей
 		// политикой разбора, а не догадка на ходу.
+
+		HouseTypes:   houseTypes(it.Types),
+		Surroundings: surroundings(it.Badges),
+		PetsAllowed:  petsAllowed(it.Animal),
+		Rating:       it.Rating,
+		ReviewsCount: it.ReviewsCount,
+		DistanceKm:   distanceKm(it.City.Distance),
+		Highway:      strings.TrimSpace(it.City.Highway),
+		PriceValue:   it.Price.Value,
+
 		Contact: strings.TrimSpace(it.Telephone),
 		MapURL:  strings.TrimSpace(it.Website),
 		Cover:   firstNonEmpty(it.ThumbMain.SrcWebp, it.ThumbMain.Src),
@@ -78,6 +88,28 @@ func buildLocation(region, nearCity string) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// generalHouseType — категория-свалка источника: под «Эко-дом» у него больше
+// двух третей каталога, и формы жилья это слово не сообщает. В типы не берём —
+// иначе раздел «Эко-дом» соберёт 69% объектов и перестанет что-либо значить.
+const generalHouseType = "эко-дом"
+
+// houseTypes — формы жилья объекта. Пустой список означает «источник не
+// сказал»: гадать по названию нельзя, «Дом у озера» может быть чем угодно.
+func houseTypes(types []apiType) []string {
+	out := make([]string, 0, len(types))
+	for _, t := range types {
+		name := strings.TrimSpace(t.Name)
+		if name == "" || strings.EqualFold(name, generalHouseType) {
+			continue
+		}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil // omitempty уберёт поле целиком
+	}
+	return out
 }
 
 // collectPhotos берёт готовые webp-кадры сайта (fallback на src/обложку).

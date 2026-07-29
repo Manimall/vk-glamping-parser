@@ -1,0 +1,93 @@
+package glamping_rf
+
+// Повтор запроса при временном сбое источника.
+//
+// Сайт-источник периодически отвечает по 15 секунд вместо одной, и тогда даже
+// TLS-рукопожатие не укладывается в таймаут. Без повторов один такой момент
+// стоит целого региона: collectPlace получает ошибку и молча прекращает обход,
+// а прогон завершается словами «объектов 0» — без единой строки ERROR.
+//
+// Повторяем только сетевые и серверные сбои. Ответ 404 (объект снят с
+// каталога) и битый JSON повторять бессмысленно: со второго раза они не
+// починятся.
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"time"
+)
+
+const (
+	// maxAttempts — сколько раз пробуем один запрос. Три попытки с растущей
+	// паузой перекрывают типичный «источник задумался», а на настоящем падении
+	// сдаются за приемлемое время.
+	maxAttempts = 3
+	// retryBaseDelay — пауза перед вторым заходом; перед третьим она удваивается.
+	// Дальше наращивать нет смысла: если сайт лежит, он лежит.
+	retryBaseDelay = 3 * time.Second
+)
+
+// doWithRetry выполняет запрос, повторяя его при временных сбоях.
+//
+// Тело ответа НЕ читает — это забота вызывающего, он же его и закрывает.
+func (c *Client) doWithRetry(req *http.Request, what string) (*http.Response, error) {
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			delay := retryBaseDelay * time.Duration(attempt-1)
+			slog.Warn("glamping_rf: повтор запроса",
+				"что", what, "попытка", attempt, "пауза", delay, "прошлая_ошибка", lastErr)
+			select {
+			case <-time.After(delay):
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		}
+
+		resp, err := c.hc.Do(req)
+		if err == nil && !isRetryableStatus(resp.StatusCode) {
+			return resp, nil
+		}
+
+		if err != nil {
+			// Отмена контекста — не сбой источника, повторять нечего.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			lastErr = err
+		} else {
+			lastErr = errStatus(resp.StatusCode)
+			// Тело неудачной попытки закрываем сами: следующая попытка создаст
+			// новый ответ, а незакрытый повиснет до конца прогона.
+			resp.Body.Close()
+		}
+	}
+	return nil, lastErr
+}
+
+// isRetryableStatus — код, при котором повтор имеет смысл: сервер перегружен
+// или временно недоступен. 404 сюда не входит — объект снят с каталога, и это
+// ответ, а не сбой.
+func isRetryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+type statusError int
+
+func (e statusError) Error() string {
+	return "glamping_rf: источник ответил " + http.StatusText(int(e))
+}
+
+func errStatus(code int) error { return statusError(code) }

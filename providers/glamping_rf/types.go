@@ -38,6 +38,27 @@ type apiItem struct {
 	Types     []apiType    `json:"types"`
 	Website   string       `json:"website"`
 	Telephone string       `json:"telephone"`
+
+	// Ниже — поля, которые источник отдаёт структурно, а мы прежде добывали
+	// разбором описания через LLM или не добывали вовсе. Структурный признак
+	// надёжнее: он не галлюцинирует и покрывает почти весь каталог.
+
+	// Badges — теги окружения: forest, river, lake, ski (плюс служебный bnovo).
+	// Заполнены у всех объектов; «в лесу» стоит у двух третей, «река» и
+	// «озеро» — у 41% каждый. Прежде эти признаки вытягивались из текста
+	// описания, где «озеро» может оказаться названием, а не водоёмом.
+	Badges []string `json:"badges"`
+
+	// Animal — «yes» / «no»: можно ли с питомцем. Заполнено у 97% объектов
+	// против 43%, которые давал разбор описания.
+	Animal string `json:"animal"`
+
+	// Rating — средняя оценка (4.845), ReviewsCount — сколько отзывов.
+	// Заполнены у 91%. Число, а не строка «4.8 · 129 отзывов», которую
+	// собирает обогащение detail-страницей: по строке нельзя ни отсортировать,
+	// ни отфильтровать.
+	Rating       float64 `json:"rating"`
+	ReviewsCount int     `json:"reviews_count"`
 }
 
 // apiImage — кадр галереи: сайт уже отдаёт готовый webp.
@@ -81,6 +102,11 @@ type apiPlace struct {
 type apiCity struct {
 	City    string `json:"city"`
 	Highway string `json:"highway"`
+	// Distance — расстояние от опорного города ЧИСЛОМ В СТРОКЕ («70»).
+	// Именно строкой: объявить int значит уронить разбор всей страницы разом,
+	// а с ним и весь регион. Unit поясняет, от чего меряли.
+	Distance string `json:"distance"`
+	Unit     string `json:"distance_measurement_type"` // «км от МКАД», «км от города»
 }
 
 type apiService struct {

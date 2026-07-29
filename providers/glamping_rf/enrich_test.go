@@ -81,8 +81,17 @@ func TestApplyDefaults_OnlyFillsGaps(t *testing.T) {
 	lean := leanObject()
 	applyDefaults(&lean)
 	cp := lean.Cabins[0].Property
-	if len(cp.Facts) != 3 { // Заезд, Выезд, Гостей
+	// Только заезд и выезд: они в отрасли действительно стандартны. Вместимость
+	// в дефолтах БОЛЬШЕ НЕТ — «до 4 гостей» подставлялось 620 объектам из 622
+	// при реальном разбросе от 2 до 24, и гость ехал вчетвером туда, где одна
+	// двуспальная кровать.
+	if len(cp.Facts) != 2 {
 		t.Fatalf("дефолт-факты: %+v", cp.Facts)
+	}
+	for _, f := range cp.Facts {
+		if f.Label == "Гостей" {
+			t.Errorf("вместимость снова выдумывается: %+v", f)
+		}
 	}
 	if len(cp.Rules) != len(defaultRules) {
 		t.Fatalf("дефолт-правила: %v", cp.Rules)
@@ -123,7 +132,7 @@ func TestParse_EnrichesAndAppliesDefaults(t *testing.T) {
 	}
 	// Объект 2: detail упал ТРАНЗИЕНТНО → оставлен с данными списка + дефолты.
 	cp2 := out[1].Cabins[0].Property
-	if len(cp2.Rules) != len(defaultRules) || len(cp2.Facts) != 3 {
+	if len(cp2.Rules) != len(defaultRules) || len(cp2.Facts) != 2 {
 		t.Errorf("объект 2 без дефолтов: rules=%v facts=%+v", cp2.Rules, cp2.Facts)
 	}
 }

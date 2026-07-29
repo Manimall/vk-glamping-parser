@@ -60,6 +60,39 @@ type Object struct {
 	// apiCity в providers/glamping_rf/types.go.
 	NearCity string `json:"nearCity,omitempty"`
 
+	// HouseTypes — форма жилья: «A-frame», «Купольный дом», «Барнхаус».
+	// Не удобство, а КАТЕГОРИЯ: гость нишевого каталога выбирает форму дома
+	// раньше, чем удобства внутри — «хочу пожить в куполе» это законченное
+	// желание, а «хочу мангал» нет.
+	//
+	// Список, а не строка: у объекта бывает несколько корпусов разной формы.
+	HouseTypes []string `json:"houseTypes,omitempty"`
+
+	// Surroundings — что вокруг: лес, река, озеро, горнолыжный склон.
+	// Приходит тегами от источника, а не разбором описания: в тексте «Лесное
+	// озеро» может оказаться названием объекта, а не водоёмом рядом.
+	Surroundings []string `json:"surroundings,omitempty"`
+
+	// PetsAllowed — можно ли с питомцем, по данным источника. Указатель, чтобы
+	// отличить «нельзя» (false) от «источник не сказал» (nil): гостю с собакой
+	// это разные ответы, и молчание нельзя показывать как запрет.
+	PetsAllowed *bool `json:"petsAllowed,omitempty"`
+
+	// Rating — средняя оценка и число отзывов. Числом, а не строкой «4.8 · 129
+	// отзывов»: по строке нельзя ни отсортировать каталог, ни отфильтровать.
+	Rating       float64 `json:"rating,omitempty"`
+	ReviewsCount int     `json:"reviewsCount,omitempty"`
+
+	// DistanceKm — сколько километров от опорного города (NearCity), Highway —
+	// по какому шоссе ехать. Вместе отвечают на вопрос, с которого начинается
+	// подмосковный выбор: «далеко ли и в какую сторону».
+	DistanceKm int    `json:"distanceKm,omitempty"`
+	Highway    string `json:"highway,omitempty"`
+
+	// PriceValue — цена числом. Строка Cabins[0].Price («7 360 ₽») остаётся
+	// для показа, но сортировать и фильтровать по ней нельзя.
+	PriceValue int `json:"priceValue,omitempty"`
+
 	Coords  *Coords         `json:"coords,omitempty"`  // координаты (если есть)
 	MapURL  string          `json:"mapUrl,omitempty"`  // ссылка на карту
 	Contact string          `json:"contact,omitempty"` // телефон/контакт

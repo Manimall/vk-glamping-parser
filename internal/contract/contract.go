@@ -60,6 +60,51 @@ type Object struct {
 	// apiCity в providers/glamping_rf/types.go.
 	NearCity string `json:"nearCity,omitempty"`
 
+	// HouseTypes — форма жилья: «A-frame», «Купольный дом», «Барнхаус».
+	// Не удобство, а КАТЕГОРИЯ: гость нишевого каталога выбирает форму дома
+	// раньше, чем удобства внутри — «хочу пожить в куполе» это законченное
+	// желание, а «хочу мангал» нет.
+	//
+	// Список, а не строка: у объекта бывает несколько корпусов разной формы.
+	HouseTypes []string `json:"houseTypes,omitempty"`
+
+	// Surroundings — что вокруг: лес, река, озеро, горнолыжный склон.
+	// Приходит тегами от источника, а не разбором описания: в тексте «Лесное
+	// озеро» может оказаться названием объекта, а не водоёмом рядом.
+	Surroundings []string `json:"surroundings,omitempty"`
+
+	// PetsAllowed — можно ли с питомцем, по данным источника. Указатель, чтобы
+	// отличить «нельзя» (false) от «источник не сказал» (nil): гостю с собакой
+	// это разные ответы, и молчание нельзя показывать как запрет.
+	PetsAllowed *bool `json:"petsAllowed,omitempty"`
+
+	// Rating — средняя оценка и число отзывов. Числом, а не строкой «4.8 · 129
+	// отзывов»: по строке нельзя ни отсортировать каталог, ни отфильтровать.
+	Rating       float64 `json:"rating,omitempty"`
+	ReviewsCount int     `json:"reviewsCount,omitempty"`
+
+	// DistanceKm — сколько километров ехать, DistanceFrom — ОТКУДА их считать,
+	// Highway — по какому шоссе. Вместе отвечают на вопрос, с которого
+	// начинается подмосковный выбор: «далеко ли и в какую сторону».
+	//
+	// Точка отсчёта обязательна рядом с числом: источник меряет то от МКАД, то
+	// от города, и в Нижегородской области расстояния лежат в диапазоне 1–151 км
+	// при том, что до Нижнего от Москвы четыреста. Одно поле «сколько км» без
+	// второго складывает несравнимое, и фильтр «до 100 км» врал бы.
+	DistanceKm   int    `json:"distanceKm,omitempty"`
+	DistanceFrom string `json:"distanceFrom,omitempty"`
+	Highway      string `json:"highway,omitempty"`
+
+	// PriceValue — цена числом. Строка Cabins[0].Price («7 360 ₽») остаётся
+	// для показа, но сортировать и фильтровать по ней нельзя.
+	PriceValue int `json:"priceValue,omitempty"`
+
+	// GuestsMax — сколько гостей помещается в самый вместительный домик.
+	// Числом, а не строкой «до 6» внутри facts: «нас шестеро» — самый ходовой
+	// фильтр каталога, и разбирать его регуляркой на стороне сайта значило бы
+	// повторить ту же ошибку, из-за которой цена и рейтинг ехали строками.
+	GuestsMax int `json:"guestsMax,omitempty"`
+
 	Coords  *Coords         `json:"coords,omitempty"`  // координаты (если есть)
 	MapURL  string          `json:"mapUrl,omitempty"`  // ссылка на карту
 	Contact string          `json:"contact,omitempty"` // телефон/контакт
@@ -79,10 +124,27 @@ type Preview struct {
 	// Region — ось группировки: по нему фильтруется каталог и работает мастер
 	// подбора бота. Locality/NearCity в плитку не кладём — они нужны только на
 	// карточке объекта, а Preview намеренно облегчённый.
-	Region string       `json:"region,omitempty"`
-	Cover  string       `json:"cover,omitempty"`
-	Price  string       `json:"price,omitempty"` // цена первого домика («7 000 ₽»)
-	Seo    *extract.SEO `json:"seo,omitempty"`   // OG-тексты для шаринга ссылки
+	Region string `json:"region,omitempty"`
+	Cover  string `json:"cover,omitempty"`
+	Price  string `json:"price,omitempty"` // цена первого домика («7 000 ₽»)
+
+	// Поля фильтров. Каталог фильтруется на клиенте по загруженному списку, а
+	// список — это Preview: чего здесь нет, по тому и не отфильтруешь. Отсюда
+	// исключение из правила «Preview облегчённая»: эти поля не для показа в
+	// плитке, а ради того, чтобы фильтр вообще стал возможен.
+	//
+	// Взято ровно то, что реально сужает выборку (охват на 309 объектах):
+	// вместимость 305, окружение 294, цена 307, питомцы 301, рейтинг 275.
+	// houseTypes сюда НЕ берём: фильтр по форме дома отложен, а охват 133 из 309
+	// — больше половины каталога молчит. Сверить:
+	//   jq '[.[]|select(.houseTypes)]|length' generated/glamping_rf/objects.json
+	Surroundings []string `json:"surroundings,omitempty"`
+	PetsAllowed  *bool    `json:"petsAllowed,omitempty"`
+	GuestsMax    int      `json:"guestsMax,omitempty"`
+	PriceValue   int      `json:"priceValue,omitempty"`
+	Rating       float64  `json:"rating,omitempty"`
+
+	Seo *extract.SEO `json:"seo,omitempty"` // OG-тексты для шаринга ссылки
 }
 
 // ToPreview собирает превью из полной карточки (цена — у первого домика).
@@ -92,7 +154,16 @@ type Preview struct {
 // (чистое преобразование). Указательный ресивер (o *Object) брали бы для
 // мутаций или чтобы не копировать крупную структуру.
 func (o Object) ToPreview() Preview {
-	p := Preview{Slug: o.Slug, Title: o.Title, Location: o.Location, Region: o.Region, Cover: o.Cover, Seo: o.Seo}
+	p := Preview{
+		Slug: o.Slug, Title: o.Title, Location: o.Location, Region: o.Region,
+		Cover: o.Cover, Seo: o.Seo,
+
+		Surroundings: o.Surroundings,
+		PetsAllowed:  o.PetsAllowed,
+		GuestsMax:    o.GuestsMax,
+		PriceValue:   o.PriceValue,
+		Rating:       o.Rating,
+	}
 	if len(o.Cabins) > 0 {
 		p.Price = o.Cabins[0].Price
 	}

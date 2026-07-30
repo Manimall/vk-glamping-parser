@@ -2,6 +2,7 @@ package contract
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +68,111 @@ func TestToPreview_CarriesRegion(t *testing.T) {
 
 	if empty := (Object{}).ToPreview(); empty.Region != "" {
 		t.Fatalf("region=%q взялся из ниоткуда", empty.Region)
+	}
+}
+
+// Поля фильтров опускаются, когда источник промолчал. Ноль и пустой список в
+// выдаче потребитель прочитает как ответ: «0 ₽», «0 гостей», «питомцы нельзя» —
+// и покажет гостю утверждение, которого никто не делал.
+func TestObject_JSON_OmitsEmptyFilterFields(t *testing.T) {
+	raw, err := json.Marshal(Object{Slug: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{
+		"houseTypes", "surroundings", "petsAllowed",
+		"rating", "reviewsCount", "distanceKm", "distanceFrom", "highway",
+		"priceValue", "guestsMax",
+	} {
+		if strings.Contains(string(raw), `"`+field+`"`) {
+			t.Errorf("пустое поле %q попало в JSON: %s", field, raw)
+		}
+	}
+}
+
+// petsAllowed — указатель именно ради этой разницы: «нельзя» обязано доехать
+// до фронта, а молчание источника — нет. Для гостя с собакой это разные ответы.
+func TestObject_JSON_PetsAllowedFalseIsNotSilence(t *testing.T) {
+	no := false
+	raw, err := json.Marshal(Object{PetsAllowed: &no})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"petsAllowed":false`) {
+		t.Errorf("явное «нельзя» потерялось: %s", raw)
+	}
+}
+
+func TestObject_JSON_KeepsFilledFilterFields(t *testing.T) {
+	yes := true
+	raw, err := json.Marshal(Object{
+		HouseTypes:   []string{"A-frame"},
+		Surroundings: []string{"В лесу"},
+		PetsAllowed:  &yes,
+		Rating:       4.8,
+		ReviewsCount: 129,
+		DistanceKm:   70,
+		DistanceFrom: "МКАД",
+		Highway:      "Дмитровское",
+		PriceValue:   7360,
+		GuestsMax:    6,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"houseTypes":["A-frame"]`, `"surroundings":["В лесу"]`,
+		`"petsAllowed":true`, `"rating":4.8`, `"reviewsCount":129`,
+		`"distanceKm":70`, `"distanceFrom":"МКАД"`, `"highway":"Дмитровское"`,
+		`"priceValue":7360`, `"guestsMax":6`,
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("нет %s в %s", want, raw)
+		}
+	}
+}
+
+// Каталог фильтруется на клиенте по загруженному списку, а список — это
+// Preview. Поле, не доехавшее сюда, делает фильтр по себе невозможным: именно
+// так чипсы каталога и оказались мёртвыми — они читали tags, которых в Preview
+// нет и не было.
+func TestToPreview_CarriesFilterFields(t *testing.T) {
+	no := false
+	full := Object{
+		Slug: "x", Title: "Объект",
+		Surroundings: []string{"Лес", "Река"},
+		PetsAllowed:  &no,
+		GuestsMax:    6,
+		PriceValue:   7360,
+		Rating:       4.8,
+		Cabins:       []Cabin{{Price: "7 360 ₽"}},
+	}
+	p := full.ToPreview()
+
+	if len(p.Surroundings) != 2 || p.Surroundings[0] != "Лес" {
+		t.Errorf("surroundings=%v", p.Surroundings)
+	}
+	if p.PetsAllowed == nil || *p.PetsAllowed != false {
+		t.Errorf("petsAllowed=%v — явное «нельзя» обязано доехать", p.PetsAllowed)
+	}
+	if p.GuestsMax != 6 || p.PriceValue != 7360 || p.Rating != 4.8 {
+		t.Errorf("guestsMax=%d priceValue=%d rating=%v", p.GuestsMax, p.PriceValue, p.Rating)
+	}
+	if p.Price != "7 360 ₽" {
+		t.Errorf("price=%q — строка для показа осталась на месте", p.Price)
+	}
+}
+
+// Молчание источника обязано остаться молчанием и в превью: ноль в JSON фронт
+// прочитает как «0 ₽» и «0 гостей».
+func TestToPreview_OmitsUnknownFilterFields(t *testing.T) {
+	raw, err := json.Marshal(Object{Slug: "x"}.ToPreview())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"surroundings", "petsAllowed", "guestsMax", "priceValue", "rating"} {
+		if strings.Contains(string(raw), `"`+field+`"`) {
+			t.Errorf("пустое поле %q попало в превью: %s", field, raw)
+		}
 	}
 }

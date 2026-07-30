@@ -43,9 +43,13 @@ type detailData struct {
 	Extras      []extract.Extra // платные услуги (баня/чан/питомец) с ценой
 	Rules       []string        // правила из FAQ (очищенный текст)
 	Guests      int             // вместимость: базовые + доп. места
-	Area        string          // «80 м²»
-	Lat         float64         // точная точка объекта из placemark карты
-	Lng         float64
+	// HouseTypes — формы жилья по названиям домиков. Тег types источника для
+	// этого не годится: у двух третей каталога там «Эко-дом», потому что у
+	// объекта бывает девять домиков разных форм и одним тегом их не описать.
+	HouseTypes []string
+	Area       string  // «80 м²»
+	Lat        float64 // точная точка объекта из placemark карты
+	Lng        float64
 }
 
 // tagRe счищает HTML-теги из текстов (описание, FAQ).
@@ -69,7 +73,7 @@ func (c *Client) fetchDetail(ctx context.Context, id int) (*detailData, error) {
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := c.hc.Do(req)
+	resp, err := c.doWithRetry(req, fmt.Sprintf("detail id=%d", id))
 	if err != nil {
 		return nil, fmt.Errorf("glamping_rf: detail id=%d: %w", id, err)
 	}
@@ -97,13 +101,31 @@ func parseDetailHTML(page string, id int) *detailData {
 	}
 	d.Photos = detailPhotos(page, id)
 
-	if m := capacityRe.FindStringSubmatch(page); m != nil {
-		base, _ := strconv.Atoi(m[1])
-		extra, _ := strconv.Atoi(m[2]) // пустая группа → 0
-		d.Guests = base + extra
+	// Вместимость и площадь: сначала характеристики домиков из встроенного
+	// JSON, потом старые регулярки по вёрстке.
+	//
+	// Порядок именно такой, потому что регулярка по вёрстке почти не совпадает:
+	// между словом «Вместимость» и числом стоят HTML-теги, и почти весь каталог
+	// получал дефолтное «до 4 гостей». Гость видел «до 4», ехал вчетвером, а его
+	// ждала одна двуспальная кровать. Из JSON вместимость известна у 305
+	// объектов из 309, с разбросом от двух гостей до двадцати семи.
+	rooms := parseRoomsWithSpecs(page)
+	specs := detailRoomSpecs(rooms)
+	d.Guests = specs.Guests
+	if d.Guests == 0 {
+		if m := capacityRe.FindStringSubmatch(page); m != nil {
+			base, _ := strconv.Atoi(m[1])
+			extra, _ := strconv.Atoi(m[2]) // пустая группа → 0
+			d.Guests = base + extra
+		}
 	}
+
+	d.HouseTypes = houseTypesFromRooms(rooms)
 	d.Area = detailArea(page)
-	d.Extras = detailPaidExtras(page)
+	if d.Area == "" && specs.AreaM2 > 0 {
+		d.Area = strconv.Itoa(specs.AreaM2) + " м²"
+	}
+	d.Extras = detailPaidExtras(rooms)
 	if lat, lng, ok := detailPlacemark(page); ok {
 		d.Lat, d.Lng = lat, lng
 	}

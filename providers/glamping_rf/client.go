@@ -64,7 +64,7 @@ func (c *Client) fetchPage(ctx context.Context, place, page int) (*apiResponse, 
 	req.Header.Set(ajaxHeader, ajaxValue)
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := c.hc.Do(req)
+	resp, err := c.doWithRetry(req, fmt.Sprintf("страница place=%d page=%d", place, page))
 	if err != nil {
 		return nil, fmt.Errorf("glamping_rf: do request place=%d page=%d: %w", place, page, err)
 	}

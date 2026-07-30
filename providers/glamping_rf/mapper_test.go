@@ -136,3 +136,78 @@ func TestToObject_TrimsAddressOnce(t *testing.T) {
 		t.Errorf("location=%q", o.Location)
 	}
 }
+
+// Тип дома — верхний уровень навигации каталога: гость нишевого сервиса
+// выбирает форму жилья раньше удобств. Источник отдаёт её структурно, но
+// парсер поле игнорировал, и на сайте типов не было вовсе.
+func TestHouseTypes(t *testing.T) {
+	t.Run("берём формы жилья", func(t *testing.T) {
+		got := houseTypes([]apiType{{Name: "A-frame"}, {Name: "Купольный дом"}})
+		if len(got) != 2 || got[0] != "A-frame" || got[1] != "Купольный дом" {
+			t.Fatalf("houseTypes = %v", got)
+		}
+	})
+
+	// «Эко-дом» стоит у 69% каталога и о форме дома не говорит ничего.
+	// Раздел с двумя третями объектов не сужает — значит это не тип.
+	t.Run("категорию-свалку отбрасываем", func(t *testing.T) {
+		if got := houseTypes([]apiType{{Name: "Эко-дом"}}); got != nil {
+			t.Errorf("«Эко-дом» попал в типы: %v", got)
+		}
+		got := houseTypes([]apiType{{Name: "Эко-дом"}, {Name: "A-frame"}})
+		if len(got) != 1 || got[0] != "A-frame" {
+			t.Errorf("отбросили лишнее: %v", got)
+		}
+	})
+
+	// Пустой список должен исчезнуть из JSON целиком (omitempty), а не
+	// приехать как []: потребитель отличает «нет типа» от «типов ноль».
+	t.Run("нет типов — nil, а не пустой срез", func(t *testing.T) {
+		if got := houseTypes(nil); got != nil {
+			t.Errorf("ожидали nil, got %#v", got)
+		}
+		if got := houseTypes([]apiType{{Name: "  "}}); got != nil {
+			t.Errorf("пробельное имя не отброшено: %#v", got)
+		}
+	})
+
+	t.Run("доезжает до контракта", func(t *testing.T) {
+		it := sampleItem()
+		it.Types = []apiType{{Name: "A-frame"}, {Name: "Эко-дом"}}
+		o := toObject(it)
+		if len(o.HouseTypes) != 1 || o.HouseTypes[0] != "A-frame" {
+			t.Fatalf("HouseTypes = %v", o.HouseTypes)
+		}
+	})
+}
+
+// «Эко-дом» и «Номер» формой жилья не являются: первое — категория-свалка
+// источника (под ней две трети каталога), второе — тип размещения, комната в
+// корпусе. У 13 объектов из 20 «Номер» был ЕДИНСТВЕННЫМ типом, то есть подменял
+// собой отсутствие данных.
+func TestHouseTypes_DropsNonForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		types []apiType
+		want  []string
+	}{
+		{"свалка отбрасывается", []apiType{{Name: "Эко-дом"}}, nil},
+		{"другое написание тоже", []apiType{{Name: "Эко дом"}, {Name: "экодом"}}, nil},
+		{"тип размещения отбрасывается", []apiType{{Name: "Номер"}}, nil},
+		{"настоящая форма остаётся", []apiType{{Name: "Эко-дом"}, {Name: "Барнхаус"}}, []string{"Барнхаус"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := houseTypes(c.types)
+			if len(got) != len(c.want) {
+				t.Fatalf("houseTypes = %v, ожидали %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("houseTypes = %v, ожидали %v", got, c.want)
+				}
+			}
+		})
+	}
+}

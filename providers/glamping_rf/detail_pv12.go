@@ -5,7 +5,6 @@ package glamping_rf
 // источник доп.услуг (баня/чан/питомец), которые гость заказывает → растят чек.
 
 import (
-	"encoding/json"
 	"html"
 	"regexp"
 	"strconv"
@@ -17,11 +16,7 @@ import (
 // roomDetailsMarker — начало встроенного JSON с домиками и их удобствами.
 const roomDetailsMarker = "window.pv12RoomDetails ="
 
-// pv12Room — домик из window.pv12RoomDetails.
-type pv12Room struct {
-	Amenities []pv12Amenity `json:"amenities"`
-}
-
+// pv12Amenity — удобство домика: платное попадает в доп.услуги объекта.
 type pv12Amenity struct {
 	Name string `json:"name"`
 	Paid bool   `json:"paid"`
@@ -54,17 +49,12 @@ const hourlyTailWindow = 20
 // hourlyRe — признак почасовой цены в хвосте сразу после суммы.
 var hourlyRe = regexp.MustCompile(`(?i)[в/]\s*час`)
 
-// detailPaidExtras — платные услуги объекта из window.pv12RoomDetails:
-// собираем помеченные paid (дедуп по имени), цена — из описания.
-func detailPaidExtras(page string) []extract.Extra {
-	raw := balancedJSON(page, roomDetailsMarker, '{', '}')
-	if raw == "" {
-		return nil
-	}
-	var rooms map[string]pv12Room
-	if err := json.Unmarshal([]byte(raw), &rooms); err != nil {
-		return nil
-	}
+// detailPaidExtras — платные услуги объекта: собираем помеченные paid
+// (дедуп по имени), цена — из описания.
+//
+// Домики принимает готовыми: разбирает встроенный JSON parseRoomsWithSpecs, и
+// делает это ОДИН раз на страницу.
+func detailPaidExtras(rooms map[string]pv12RoomWithSpecs) []extract.Extra {
 	seen := make(map[string]bool)
 	var extras []extract.Extra
 	for _, room := range rooms {

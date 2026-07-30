@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"vk-parser/internal/contract"
+	"vk-parser/internal/extract"
 )
 
 func leanObject() contract.Object {
@@ -81,8 +82,17 @@ func TestApplyDefaults_OnlyFillsGaps(t *testing.T) {
 	lean := leanObject()
 	applyDefaults(&lean)
 	cp := lean.Cabins[0].Property
-	if len(cp.Facts) != 3 { // Заезд, Выезд, Гостей
+	// Только заезд и выезд: они в отрасли действительно стандартны. Вместимость
+	// в дефолтах БОЛЬШЕ НЕТ — «до 4 гостей» подставлялось почти всему каталогу
+	// при реальном разбросе от 2 до 27, и гость ехал вчетвером туда, где одна
+	// двуспальная кровать.
+	if len(cp.Facts) != 2 {
 		t.Fatalf("дефолт-факты: %+v", cp.Facts)
+	}
+	for _, f := range cp.Facts {
+		if f.Label == "Гостей" {
+			t.Errorf("вместимость снова выдумывается: %+v", f)
+		}
 	}
 	if len(cp.Rules) != len(defaultRules) {
 		t.Fatalf("дефолт-правила: %v", cp.Rules)
@@ -123,7 +133,7 @@ func TestParse_EnrichesAndAppliesDefaults(t *testing.T) {
 	}
 	// Объект 2: detail упал ТРАНЗИЕНТНО → оставлен с данными списка + дефолты.
 	cp2 := out[1].Cabins[0].Property
-	if len(cp2.Rules) != len(defaultRules) || len(cp2.Facts) != 3 {
+	if len(cp2.Rules) != len(defaultRules) || len(cp2.Facts) != 2 {
 		t.Errorf("объект 2 без дефолтов: rules=%v facts=%+v", cp2.Rules, cp2.Facts)
 	}
 }
@@ -152,5 +162,25 @@ func TestParse_DropsDelistedObjects(t *testing.T) {
 		if o.Slug == "obj-3" {
 			t.Errorf("объект 3 (404) не должен попасть в выдачу")
 		}
+	}
+}
+
+// Вместимость обязана доехать до объект-уровня числом: по строке «до 6» внутри
+// facts каталог не отфильтруешь, а фильтр «нас шестеро» — самый ходовой.
+func TestMergeDetail_GuestsMax(t *testing.T) {
+	obj := contract.Object{Cabins: []contract.Cabin{{Property: &extract.Property{}}}}
+	mergeDetail(&obj, &detailData{Guests: 6})
+	if obj.GuestsMax != 6 {
+		t.Errorf("GuestsMax = %d, ожидали 6", obj.GuestsMax)
+	}
+}
+
+// Молчание источника не должно превращаться в ноль-как-ответ: omitempty уберёт
+// поле, и сайт покажет «неизвестно» вместо выдуманного числа.
+func TestMergeDetail_GuestsMaxAbsentWhenUnknown(t *testing.T) {
+	obj := contract.Object{Cabins: []contract.Cabin{{Property: &extract.Property{}}}}
+	mergeDetail(&obj, &detailData{})
+	if obj.GuestsMax != 0 {
+		t.Errorf("GuestsMax = %d, ожидали 0 (поле опустится)", obj.GuestsMax)
 	}
 }

@@ -35,6 +35,17 @@ func toObject(it apiItem) contract.Object {
 		// Настоящий населённый пункт лежит только в разметке detail-страницы,
 		// свободным текстом и противоречиво — это отдельная задача со своей
 		// политикой разбора, а не догадка на ходу.
+
+		HouseTypes:   houseTypes(it.Types),
+		Surroundings: surroundings(it.Badges),
+		PetsAllowed:  petsAllowed(it.Animal),
+		Rating:       it.Rating,
+		ReviewsCount: it.ReviewsCount,
+		DistanceKm:   distanceKm(it.City.Distance),
+		DistanceFrom: strings.TrimSpace(it.City.Unit),
+		Highway:      canonHighway(it.City.Highway),
+		PriceValue:   it.Price.Value,
+
 		Contact: strings.TrimSpace(it.Telephone),
 		MapURL:  strings.TrimSpace(it.Website),
 		Cover:   firstNonEmpty(it.ThumbMain.SrcWebp, it.ThumbMain.Src),
@@ -78,6 +89,49 @@ func buildLocation(region, nearCity string) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// Слова, которые формой жилья НЕ являются и в типы не берутся.
+//
+// «Эко-дом» — категория-свалка источника: под ней больше двух третей каталога,
+// и раздел из неё собрал бы 69% объектов, перестав что-либо значить.
+//
+// «Номер» — тип размещения, а не форма дома: комната в корпусе. В нишевом
+// каталоге A-frame такой раздел не сужает выбор ничем, а у 13 объектов из 20 он
+// оказывался ЕДИНСТВЕННЫМ типом — то есть подменял собой отсутствие данных.
+var notHouseTypes = map[string]bool{
+	"Эко-дом": true,
+	"Номер":   true,
+}
+
+// houseTypes — формы жилья объекта. Пустой список означает «источник не
+// сказал»: гадать по названию нельзя, «Дом у озера» может быть чем угодно.
+//
+// Названия канонизируются ЗДЕСЬ, а не только при слиянии с данными
+// detail-страницы: та отдаётся не всегда, и при сбое объект уезжал с сырым
+// написанием источника. «БарнХаус» рядом с «Барнхаус» — это два раздела на
+// одну форму, между которыми делятся объекты.
+func houseTypes(types []apiType) []string {
+	out := make([]string, 0, len(types))
+	seen := make(map[string]bool, len(types))
+	for _, t := range types {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			continue
+		}
+		// Сравниваем ПОСЛЕ канонизации: «Эко дом» и «экодом» пишутся по-разному,
+		// а означают одно и то же.
+		canon := canonHouseType(name)
+		if notHouseTypes[canon] || seen[canon] {
+			continue
+		}
+		seen[canon] = true
+		out = append(out, canon)
+	}
+	if len(out) == 0 {
+		return nil // omitempty уберёт поле целиком
+	}
+	return out
 }
 
 // collectPhotos берёт готовые webp-кадры сайта (fallback на src/обложку).

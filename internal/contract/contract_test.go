@@ -81,7 +81,7 @@ func TestObject_JSON_OmitsEmptyFilterFields(t *testing.T) {
 	}
 	for _, field := range []string{
 		"houseTypes", "surroundings", "petsAllowed",
-		"rating", "reviewsCount", "distanceKm", "highway",
+		"rating", "reviewsCount", "distanceKm", "distanceFrom", "highway",
 		"priceValue", "guestsMax",
 	} {
 		if strings.Contains(string(raw), `"`+field+`"`) {
@@ -112,6 +112,7 @@ func TestObject_JSON_KeepsFilledFilterFields(t *testing.T) {
 		Rating:       4.8,
 		ReviewsCount: 129,
 		DistanceKm:   70,
+		DistanceFrom: "МКАД",
 		Highway:      "Дмитровское",
 		PriceValue:   7360,
 		GuestsMax:    6,
@@ -122,7 +123,7 @@ func TestObject_JSON_KeepsFilledFilterFields(t *testing.T) {
 	for _, want := range []string{
 		`"houseTypes":["A-frame"]`, `"surroundings":["В лесу"]`,
 		`"petsAllowed":true`, `"rating":4.8`, `"reviewsCount":129`,
-		`"distanceKm":70`, `"highway":"Дмитровское"`,
+		`"distanceKm":70`, `"distanceFrom":"МКАД"`, `"highway":"Дмитровское"`,
 		`"priceValue":7360`, `"guestsMax":6`,
 	} {
 		if !strings.Contains(string(raw), want) {

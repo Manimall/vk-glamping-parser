@@ -129,8 +129,9 @@ type Preview struct {
 	//
 	// Взято ровно то, что реально сужает выборку (охват на 309 объектах):
 	// вместимость 305, окружение 294, цена 307, питомцы 301, рейтинг 275.
-	// houseTypes сюда НЕ берём: фильтр по форме дома отложен, а охват 146 из
-	// 309 — половина каталога молчит.
+	// houseTypes сюда НЕ берём: фильтр по форме дома отложен, а охват 133 из 309
+	// — больше половины каталога молчит. Сверить:
+	//   jq '[.[]|select(.houseTypes)]|length' generated/glamping_rf/objects.json
 	Surroundings []string `json:"surroundings,omitempty"`
 	PetsAllowed  *bool    `json:"petsAllowed,omitempty"`
 	GuestsMax    int      `json:"guestsMax,omitempty"`

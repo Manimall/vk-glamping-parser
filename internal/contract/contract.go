@@ -93,6 +93,12 @@ type Object struct {
 	// для показа, но сортировать и фильтровать по ней нельзя.
 	PriceValue int `json:"priceValue,omitempty"`
 
+	// GuestsMax — сколько гостей помещается в самый вместительный домик.
+	// Числом, а не строкой «до 6» внутри facts: «нас шестеро» — самый ходовой
+	// фильтр каталога, и разбирать его регуляркой на стороне сайта значило бы
+	// повторить ту же ошибку, из-за которой цена и рейтинг ехали строками.
+	GuestsMax int `json:"guestsMax,omitempty"`
+
 	Coords  *Coords         `json:"coords,omitempty"`  // координаты (если есть)
 	MapURL  string          `json:"mapUrl,omitempty"`  // ссылка на карту
 	Contact string          `json:"contact,omitempty"` // телефон/контакт

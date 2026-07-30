@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"vk-parser/internal/contract"
+	"vk-parser/internal/extract"
 )
 
 func leanObject() contract.Object {
@@ -161,5 +162,25 @@ func TestParse_DropsDelistedObjects(t *testing.T) {
 		if o.Slug == "obj-3" {
 			t.Errorf("объект 3 (404) не должен попасть в выдачу")
 		}
+	}
+}
+
+// Вместимость обязана доехать до объект-уровня числом: по строке «до 6» внутри
+// facts каталог не отфильтруешь, а фильтр «нас шестеро» — самый ходовой.
+func TestMergeDetail_GuestsMax(t *testing.T) {
+	obj := contract.Object{Cabins: []contract.Cabin{{Property: &extract.Property{}}}}
+	mergeDetail(&obj, &detailData{Guests: 6})
+	if obj.GuestsMax != 6 {
+		t.Errorf("GuestsMax = %d, ожидали 6", obj.GuestsMax)
+	}
+}
+
+// Молчание источника не должно превращаться в ноль-как-ответ: omitempty уберёт
+// поле, и сайт покажет «неизвестно» вместо выдуманного числа.
+func TestMergeDetail_GuestsMaxAbsentWhenUnknown(t *testing.T) {
+	obj := contract.Object{Cabins: []contract.Cabin{{Property: &extract.Property{}}}}
+	mergeDetail(&obj, &detailData{})
+	if obj.GuestsMax != 0 {
+		t.Errorf("GuestsMax = %d, ожидали 0 (поле опустится)", obj.GuestsMax)
 	}
 }

@@ -97,14 +97,25 @@ const generalHouseType = "эко-дом"
 
 // houseTypes — формы жилья объекта. Пустой список означает «источник не
 // сказал»: гадать по названию нельзя, «Дом у озера» может быть чем угодно.
+//
+// Названия канонизируются ЗДЕСЬ, а не только при слиянии с данными
+// detail-страницы: та отдаётся не всегда, и при сбое объект уезжал с сырым
+// написанием источника. «БарнХаус» рядом с «Барнхаус» — это два раздела на
+// одну форму, между которыми делятся объекты.
 func houseTypes(types []apiType) []string {
 	out := make([]string, 0, len(types))
+	seen := make(map[string]bool, len(types))
 	for _, t := range types {
 		name := strings.TrimSpace(t.Name)
 		if name == "" || strings.EqualFold(name, generalHouseType) {
 			continue
 		}
-		out = append(out, name)
+		canon := canonHouseType(name)
+		if seen[canon] {
+			continue
+		}
+		seen[canon] = true
+		out = append(out, canon)
 	}
 	if len(out) == 0 {
 		return nil // omitempty уберёт поле целиком

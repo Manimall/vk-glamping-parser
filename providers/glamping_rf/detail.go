@@ -108,7 +108,8 @@ func parseDetailHTML(page string, id int) *detailData {
 	// «Вместимость» в разметке источника больше нет, и capacityRe не совпал НИ
 	// НА ОДНОЙ странице — у 620 объектов из 622 стояло дефолтное «до 4 гостей».
 	// Гость видел «до 4», ехал вчетвером, а его ждала одна двуспальная кровать.
-	specs := detailRoomSpecs(page)
+	rooms := parseRoomsWithSpecs(page)
+	specs := detailRoomSpecs(rooms)
 	d.Guests = specs.Guests
 	if d.Guests == 0 {
 		if m := capacityRe.FindStringSubmatch(page); m != nil {
@@ -118,7 +119,7 @@ func parseDetailHTML(page string, id int) *detailData {
 		}
 	}
 
-	d.HouseTypes = houseTypesFromRooms(page)
+	d.HouseTypes = houseTypesFromRooms(rooms)
 	d.Area = detailArea(page)
 	if d.Area == "" && specs.AreaM2 > 0 {
 		d.Area = strconv.Itoa(specs.AreaM2) + " м²"

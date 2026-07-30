@@ -16,8 +16,8 @@ func TestParseRoomSpecs(t *testing.T) {
 		{"площадь и двуспальная", []string{"📐 32 м²", "🛌 1 двуспальная"}, 2, 32},
 		{"две двуспальные", []string{"🛌 2 двуспальная"}, 4, 0},
 		{"односпальные считаются по одному", []string{"🛏 2 односпальная"}, 2, 0},
-		{"диван-кровать раскладывается на двоих", []string{"🛋 1 диван-кровать"}, 2, 0},
-		{"места складываются", []string{"🛌 1 двуспальная", "🛋 1 диван-кровать"}, 4, 0},
+		{"диван-кровать — одно место, не два", []string{"🛋 1 диван-кровать"}, 1, 0},
+		{"места складываются", []string{"🛌 1 двуспальная", "🛋 1 диван-кровать"}, 3, 0},
 		{"без спальных мест — ноль, а не дефолт", []string{"📐 40 м²"}, 0, 40},
 		{"пусто", nil, 0, 0},
 	}
@@ -52,9 +52,9 @@ func TestDetailRoomSpecs_TakesLargestRoom(t *testing.T) {
 		"3": {"specs": ["📐 30 м²", "🛏 2 односпальная"]}
 	};</script>`
 
-	got := detailRoomSpecs(page)
-	if got.Guests != 6 {
-		t.Errorf("гостей = %d, ожидали 6 (самый вместительный домик)", got.Guests)
+	got := detailRoomSpecs(parseRoomsWithSpecs(page))
+	if got.Guests != 5 {
+		t.Errorf("гостей = %d, ожидали 5 (самый вместительный домик)", got.Guests)
 	}
 	if got.AreaM2 != 55 {
 		t.Errorf("площадь = %d, ожидали 55 (наибольшая)", got.AreaM2)
@@ -65,7 +65,7 @@ func TestDetailRoomSpecs_TakesLargestRoom(t *testing.T) {
 // выдуманное «до 4 гостей» по всему каталогу.
 func TestDetailRoomSpecs_NoDataIsZero(t *testing.T) {
 	for _, page := range []string{"", "<html>без джейсона</html>", `window.pv12RoomDetails = {};`} {
-		if got := detailRoomSpecs(page); got.Guests != 0 || got.AreaM2 != 0 {
+		if got := detailRoomSpecs(parseRoomsWithSpecs(page)); got.Guests != 0 || got.AreaM2 != 0 {
 			t.Errorf("на %q выдумали %+v", page[:min(len(page), 20)], got)
 		}
 	}
@@ -89,7 +89,7 @@ func TestHouseTypesFromRooms(t *testing.T) {
 		"3": {"name": "Smart Lodge"}
 	};`
 
-	got := houseTypesFromRooms(page)
+	got := houseTypesFromRooms(parseRoomsWithSpecs(page))
 	if len(got) != 2 {
 		t.Fatalf("houseTypes = %v, ожидали купол и барнхаус", got)
 	}
@@ -115,7 +115,7 @@ func TestHouseTypesFromRooms_Vocabulary(t *testing.T) {
 	for name, want := range cases {
 		t.Run(name, func(t *testing.T) {
 			page := `window.pv12RoomDetails = {"1": {"name": "` + name + `"}};`
-			got := houseTypesFromRooms(page)
+			got := houseTypesFromRooms(parseRoomsWithSpecs(page))
 			if len(got) != 1 || got[0] != want {
 				t.Errorf("«%s» → %v, ожидали %q", name, got, want)
 			}
@@ -127,7 +127,7 @@ func TestHouseTypesFromRooms_Vocabulary(t *testing.T) {
 func TestHouseTypesFromRooms_NoGuessing(t *testing.T) {
 	for _, name := range []string{"Дом Семейный", "Дом на двоих", "Премиум на двоих", "дом КЕНЗА"} {
 		page := `window.pv12RoomDetails = {"1": {"name": "` + name + `"}};`
-		if got := houseTypesFromRooms(page); got != nil {
+		if got := houseTypesFromRooms(parseRoomsWithSpecs(page)); got != nil {
 			t.Errorf("«%s» → выдумали %v", name, got)
 		}
 	}
@@ -144,5 +144,78 @@ func TestMergeHouseTypes(t *testing.T) {
 	}
 	if got := mergeHouseTypes([]string{"Барнхаус"}, nil); len(got) != 1 {
 		t.Errorf("теги списка потеряны: %v", got)
+	}
+}
+
+// Источник называет вместимость прямо в описании комнаты, и его слово важнее
+// нашей арифметики по кроватям. Сверка на живых страницах: «3 двуспальные +
+// диван» у него «до 6», а расчёт давал 8 — завышение ровно того рода, от
+// которого уходили.
+func TestParseRoom_DeclaredCapacityWins(t *testing.T) {
+	room := pv12RoomWithSpecs{
+		Specs: []string{"📐 64 м²", "🛌 3 двуспальная", "🛋 1 диван-кровать"},
+		Desc:  "Просторный коттедж. Вместимость: до 6 гостей (есть возможность доп. места)",
+	}
+	if got := parseRoom(room).Guests; got != 6 {
+		t.Errorf("гостей = %d, ожидали 6 — источник назвал число прямо", got)
+	}
+}
+
+func TestParseRoom_FallsBackToBeds(t *testing.T) {
+	// Источник промолчал — считаем по спальным местам.
+	room := pv12RoomWithSpecs{
+		Specs: []string{"🛌 1 двуспальная", "🛏 2 односпальная"},
+		Desc:  "Уютный домик у леса.",
+	}
+	if got := parseRoom(room).Guests; got != 4 {
+		t.Errorf("гостей = %d, ожидали 4 по кроватям", got)
+	}
+}
+
+// Формат «Вместимость: ДО N» — тот самый, из-за которого старая регулярка
+// перестала находить число: она ждала его сразу за двоеточием.
+func TestDeclaredCapacity_Formats(t *testing.T) {
+	cases := map[string]int{
+		"Вместимость: до 2 гостей":                          2,
+		"Вместимость: до 4-х гостей (2 взрослых + 2 детей)": 4,
+		"Вместимость: 5 гостей":                             5,
+		"вместимость до 8 человек":                          8,
+	}
+	for desc, want := range cases {
+		got := parseRoom(pv12RoomWithSpecs{Desc: desc}).Guests
+		if got != want {
+			t.Errorf("%q → %d, ожидали %d", desc, got, want)
+		}
+	}
+}
+
+// Подстрока внутри другого слова формой жилья не делает: «Атмосфера» ловилась
+// как «сфера» и превращала объект в купол.
+func TestHouseTypesFromRooms_NoSubstringFalsePositives(t *testing.T) {
+	for _, name := range []string{"Атмосфера", "Биосфера", "Аутентика", "Апартаменты Аутентик"} {
+		page := `window.pv12RoomDetails = {"1": {"name": "` + name + `"}};`
+		if got := houseTypesFromRooms(parseRoomsWithSpecs(page)); got != nil {
+			t.Errorf("«%s» → выдумали %v", name, got)
+		}
+	}
+	// А настоящая форма по-прежнему находится.
+	page := `window.pv12RoomDetails = {"1": {"name": "Сфера с камином"}};`
+	if got := houseTypesFromRooms(parseRoomsWithSpecs(page)); len(got) != 1 || got[0] != "Купольный дом" {
+		t.Errorf("«Сфера с камином» → %v", got)
+	}
+}
+
+// «32.5 м²» без учёта дробной части совпадало хвостом и давало 5 м².
+func TestParseRoomSpecs_FractionalArea(t *testing.T) {
+	cases := map[string]int{
+		"📐 32 м²":   32,
+		"📐 32.5 м²": 32,
+		"📐 32,5 м²": 32,
+		"📐 105 м²":  105,
+	}
+	for spec, want := range cases {
+		if got := parseRoomSpecs([]string{spec}).AreaM2; got != want {
+			t.Errorf("%q → %d м², ожидали %d", spec, got, want)
+		}
 	}
 }

@@ -16,8 +16,7 @@ import (
 // roomDetailsMarker — начало встроенного JSON с домиками и их удобствами.
 const roomDetailsMarker = "window.pv12RoomDetails ="
 
-// pv12Room — домик из window.pv12RoomDetails.
-
+// pv12Amenity — удобство домика: платное попадает в доп.услуги объекта.
 type pv12Amenity struct {
 	Name string `json:"name"`
 	Paid bool   `json:"paid"`

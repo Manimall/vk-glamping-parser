@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -59,11 +60,22 @@ func TestAnyWordStart(t *testing.T) {
 // Проверяем ИСХОДНИКИ всего репозитория. Нашлось — используйте rx.Word или
 // rx.WordStart вместо `\b`.
 func TestNoCyrillicWordBoundaryInSources(t *testing.T) {
-	// `\b` в той же строке, что и кириллица.
-	suspicious := regexp.MustCompile(`\\b[^"'` + "`" + `\n]*[а-яА-ЯёЁ]|[а-яА-ЯёЁ][^"'` + "`" + `\n]*\\b`)
+	// Два способа записать опасную границу.
+	//
+	// Первый — `\b` в одной строке с кириллицей: `\bкм\b`, `барн\b`.
+	//
+	// Второй — собранная конкатенацией: `\b` + основа + `\b`. Кириллицы в такой
+	// строке может не быть вовсе, первый шаблон её не увидит, а поведение то же
+	// самое — граница молча не срабатывает.
+	inline := regexp.MustCompile(`\\b[^"'` + "`" + `\n]*[а-яА-ЯёЁ]|[а-яА-ЯёЁ][^"'` + "`" + `\n]*\\b`)
+	glued := regexp.MustCompile(`\\b` + "`" + `\s*\+|\+\s*` + "`" + `\\b`)
+	suspicious := func(line string) bool {
+		return inline.MatchString(line) || glued.MatchString(line)
+	}
 
 	root := "../.."
 	var found []string
+	scanned := 0
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -88,6 +100,7 @@ func TestNoCyrillicWordBoundaryInSources(t *testing.T) {
 		if err != nil {
 			return nil
 		}
+		scanned++
 		for i, line := range strings.Split(string(data), "\n") {
 			trimmed := strings.TrimSpace(line)
 			// Комментарии не проверяем: там `\b` обсуждают, а не используют.
@@ -97,8 +110,8 @@ func TestNoCyrillicWordBoundaryInSources(t *testing.T) {
 			if !strings.Contains(line, `\b`) {
 				continue
 			}
-			if suspicious.MatchString(line) {
-				found = append(found, filepath.Base(path)+":"+itoa(i+1)+"  "+trimmed)
+			if suspicious(line) {
+				found = append(found, filepath.Base(path)+":"+strconv.Itoa(i+1)+"  "+trimmed)
 			}
 		}
 		return nil
@@ -107,22 +120,17 @@ func TestNoCyrillicWordBoundaryInSources(t *testing.T) {
 		t.Fatalf("обход исходников: %v", err)
 	}
 
+	// Страж, который ничего не просканировал, молчит так же, как страж, который
+	// ничего не нашёл. Переехал пакет — и защита исчезла, не сказав ни слова.
+	const minScannedFiles = 20
+	if scanned < minScannedFiles {
+		t.Fatalf("просканировано файлов: %d — проверьте путь к корню репозитория", scanned)
+	}
+
 	if len(found) > 0 {
 		t.Errorf("`\\b` рядом с кириллицей — совпадений не будет, ошибки тоже.\n"+
 			"Используйте rx.Word / rx.WordStart:\n  %s", strings.Join(found, "\n  "))
 	}
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
 }
 
 // «$^» выглядит как «ничего не совпадёт», но с ПУСТОЙ строкой совпадает: конец

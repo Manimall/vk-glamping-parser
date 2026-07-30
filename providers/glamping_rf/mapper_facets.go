@@ -9,6 +9,7 @@ package glamping_rf
 // галлюцинирует и не зависит от того, как владелец написал текст.
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -141,4 +142,26 @@ func distanceKm(raw string) int {
 		return 0
 	}
 	return n
+}
+
+// directionSuffixRe — хвост «(Направление: …)» у федеральных трасс.
+//
+// Источник пишет его по-разному для одной и той же дороги: «М7 (Направление:
+// Москва)» и «М7 (Направление: Казань)» — это М7 в обе стороны, а не два
+// шоссе. Без чистки фильтр показывал бы две строки на одну дорогу, между
+// которыми делятся объекты — ровно то, от чего избавились в формах жилья.
+var directionSuffixRe = regexp.MustCompile(`\s*\([^)]*\)\s*$`)
+
+// spacedHyphenRe — пробелы вокруг дефиса: «Ново - рязанское».
+var spacedHyphenRe = regexp.MustCompile(`\s*-\s*`)
+
+// canonHighway приводит название шоссе к единому виду.
+//
+// Только форма записи, без переименований: «Ново-рязанское» не превращается в
+// «Новорязанское», потому что так его пишет источник, и наша задача — не
+// спорить с ним, а не плодить варианты одного значения.
+func canonHighway(name string) string {
+	out := directionSuffixRe.ReplaceAllString(strings.TrimSpace(name), "")
+	out = spacedHyphenRe.ReplaceAllString(out, "-")
+	return strings.TrimSpace(out)
 }

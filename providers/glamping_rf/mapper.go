@@ -42,7 +42,8 @@ func toObject(it apiItem) contract.Object {
 		Rating:       it.Rating,
 		ReviewsCount: it.ReviewsCount,
 		DistanceKm:   distanceKm(it.City.Distance),
-		Highway:      strings.TrimSpace(it.City.Highway),
+		DistanceFrom: strings.TrimSpace(it.City.Unit),
+		Highway:      canonHighway(it.City.Highway),
 		PriceValue:   it.Price.Value,
 
 		Contact: strings.TrimSpace(it.Telephone),

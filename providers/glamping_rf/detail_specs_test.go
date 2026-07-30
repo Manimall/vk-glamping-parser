@@ -166,3 +166,32 @@ func TestParseRoom_DeclaredCapacityNeedsPeople(t *testing.T) {
 		})
 	}
 }
+
+// Источник иногда кладёт несколько видов мест одним пунктом характеристик.
+// FindStringSubmatch брал только первый — вместимость выходила заниженной, и
+// гость не видел подходящий объект.
+func TestParseRoomSpecs_SeveralBedsInOneLine(t *testing.T) {
+	got := parseRoomSpecs([]string{"🛌 2 двуспальная, 🛏 1 односпальная"})
+	if got.Guests != 5 {
+		t.Errorf("гостей = %d, ожидали 5 (2×2 + 1)", got.Guests)
+	}
+}
+
+// Формы, которыми источник называет вместимость. Каждая должна разбираться:
+// промах означает откат к арифметике по кроватям, а она может дать другое
+// число, чем заявил владелец.
+func TestDeclaredCapacity_SourceForms(t *testing.T) {
+	cases := map[string]int{
+		"Вместимость: до 6 гостей":   6,
+		"Вместимость до 5 человек":   5,
+		"Вместимость — 7 персон":     7,
+		"Вместимость: до 4-х гостей": 4,
+		"Вместимость: 4 взрослых":    4,
+		"Вместимость до 3 чел":       3,
+	}
+	for desc, want := range cases {
+		if got := parseRoom(pv12RoomWithSpecs{Desc: desc}).Guests; got != want {
+			t.Errorf("%q → %d, ожидали %d", desc, got, want)
+		}
+	}
+}

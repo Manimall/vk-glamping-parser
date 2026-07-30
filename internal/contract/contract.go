@@ -83,11 +83,17 @@ type Object struct {
 	Rating       float64 `json:"rating,omitempty"`
 	ReviewsCount int     `json:"reviewsCount,omitempty"`
 
-	// DistanceKm — сколько километров от опорного города (NearCity), Highway —
-	// по какому шоссе ехать. Вместе отвечают на вопрос, с которого начинается
-	// подмосковный выбор: «далеко ли и в какую сторону».
-	DistanceKm int    `json:"distanceKm,omitempty"`
-	Highway    string `json:"highway,omitempty"`
+	// DistanceKm — сколько километров ехать, DistanceFrom — ОТКУДА их считать,
+	// Highway — по какому шоссе. Вместе отвечают на вопрос, с которого
+	// начинается подмосковный выбор: «далеко ли и в какую сторону».
+	//
+	// Точка отсчёта обязательна рядом с числом: источник меряет то от МКАД, то
+	// от города, и в Нижегородской области расстояния лежат в диапазоне 1–151 км
+	// при том, что до Нижнего от Москвы четыреста. Одно поле «сколько км» без
+	// второго складывает несравнимое, и фильтр «до 100 км» врал бы.
+	DistanceKm   int    `json:"distanceKm,omitempty"`
+	DistanceFrom string `json:"distanceFrom,omitempty"`
+	Highway      string `json:"highway,omitempty"`
 
 	// PriceValue — цена числом. Строка Cabins[0].Price («7 360 ₽») остаётся
 	// для показа, но сортировать и фильтровать по ней нельзя.

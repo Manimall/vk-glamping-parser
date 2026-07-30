@@ -112,7 +112,7 @@ func TestDetailPaidExtras(t *testing.T) {
 			{"name":"Горячий чан","paid":true,"desc":"запуск с июля"}
 		]}
 	};</script>`
-	extras := detailPaidExtras(page)
+	extras := detailPaidExtras(parseRoomsWithSpecs(page))
 	// Дедуп по имени: Питомец, Баня, Чан — «Кондиционер» (не платный) отброшен.
 	if len(extras) != 3 {
 		t.Fatalf("услуг = %d, ожидал 3: %+v", len(extras), extras)

@@ -180,3 +180,34 @@ func TestHouseTypes(t *testing.T) {
 		}
 	})
 }
+
+// «Эко-дом» и «Номер» формой жилья не являются: первое — категория-свалка
+// источника (под ней две трети каталога), второе — тип размещения, комната в
+// корпусе. У 13 объектов из 20 «Номер» был ЕДИНСТВЕННЫМ типом, то есть подменял
+// собой отсутствие данных.
+func TestHouseTypes_DropsNonForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		types []apiType
+		want  []string
+	}{
+		{"свалка отбрасывается", []apiType{{Name: "Эко-дом"}}, nil},
+		{"другое написание тоже", []apiType{{Name: "Эко дом"}, {Name: "экодом"}}, nil},
+		{"тип размещения отбрасывается", []apiType{{Name: "Номер"}}, nil},
+		{"настоящая форма остаётся", []apiType{{Name: "Эко-дом"}, {Name: "Барнхаус"}}, []string{"Барнхаус"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := houseTypes(c.types)
+			if len(got) != len(c.want) {
+				t.Fatalf("houseTypes = %v, ожидали %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("houseTypes = %v, ожидали %v", got, c.want)
+				}
+			}
+		})
+	}
+}

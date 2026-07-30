@@ -88,12 +88,17 @@ type roomSpecs struct {
 	Guests int
 }
 
-// pv12RoomWithSpecs — домик с характеристиками. Отдельно от pv12Room:
-// тот описывает удобства и меняется по своей причине.
+// pv12RoomWithSpecs — домик из встроенного JSON целиком: название, описание,
+// характеристики и удобства.
+//
+// Одна структура на весь домик, а не две по числу потребителей: раньше рядом
+// жил pv12Room с одними лишь услугами, и тот же JSON разбирался дважды за один
+// проход по странице в сотни килобайт.
 type pv12RoomWithSpecs struct {
-	Name  string   `json:"name"`
-	Desc  string   `json:"desc"`
-	Specs []string `json:"specs"`
+	Name      string        `json:"name"`
+	Desc      string        `json:"desc"`
+	Specs     []string      `json:"specs"`
+	Amenities []pv12Amenity `json:"amenities"`
 }
 
 // houseTypeByName — форма жилья по НАЗВАНИЮ домика.
@@ -113,9 +118,12 @@ var houseTypeByName = []struct {
 	pattern *regexp.Regexp
 	label   string
 }{
-	{regexp.MustCompile(`(?i)на дереве|tree\s*house`), "Дом на дереве"},
+	// «на дереве» целым словом, а не началом: иначе «Домик на деревенской улице»
+	// становится домом на дереве. Границу пишем через rx — `\b` в Go RE2
+	// опирается на латиницу и с кириллицей молча не срабатывает.
+	{rx.AnyWord("на дереве", "на дереву", "tree house", "treehouse"), "Дом на дереве"},
 	{rx.AnyWordStart("афрейм", "а-фрейм", "а фрейм", "aframe", "a-frame", "a frame"), "A-frame"},
-	{rx.AnyWordStart("geocupol", "геокупол", "купольн", "сфера", "сфере", "dome"), "Купольный дом"},
+	{rx.AnyWordStart("geocupol", "геокупол", "купольн", "сфер", "dome"), "Купольный дом"},
 	{rx.AnyWordStart("barn", "барн"), "Барнхаус"},
 	{rx.AnyWordStart("модом", "модульн"), "Модульный дом"},
 	{rx.AnyWordStart("сафари", "шатёр", "шатер", "тент"), "Сафари-тент"},

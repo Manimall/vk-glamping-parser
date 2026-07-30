@@ -125,7 +125,7 @@ func parseDetailHTML(page string, id int) *detailData {
 	if d.Area == "" && specs.AreaM2 > 0 {
 		d.Area = strconv.Itoa(specs.AreaM2) + " м²"
 	}
-	d.Extras = detailPaidExtras(page)
+	d.Extras = detailPaidExtras(rooms)
 	if lat, lng, ok := detailPlacemark(page); ok {
 		d.Lat, d.Lng = lat, lng
 	}

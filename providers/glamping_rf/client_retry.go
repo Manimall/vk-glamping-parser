@@ -12,6 +12,7 @@ package glamping_rf
 // починятся.
 
 import (
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -69,8 +70,11 @@ func (c *Client) doWithRetry(req *http.Request, what string) (*http.Response, er
 			lastErr = err
 		} else {
 			lastErr = errStatus(resp.StatusCode)
-			// Тело неудачной попытки закрываем сами: следующая попытка создаст
-			// новый ответ, а незакрытый повиснет до конца прогона.
+			// Тело неудачной попытки дочитываем и закрываем сами. Закрыть мало:
+			// без вычитки соединение не возвращается в пул, и каждая повторная
+			// попытка платит новым TCP-рукопожатием — как раз тогда, когда
+			// источник и так отвечает еле-еле.
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
 	}

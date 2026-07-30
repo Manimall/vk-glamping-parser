@@ -54,11 +54,30 @@ func WordStart(stem string) *regexp.Regexp {
 // Пустой список даёт выражение, которое не совпадает ни с чем.
 func AnyWordStart(stems ...string) *regexp.Regexp {
 	if len(stems) == 0 {
-		return regexp.MustCompile(`$^`) // заведомо непустое, но несовпадающее
+		// `$^` выглядит как «ничего не совпадёт», но с ПУСТОЙ строкой совпадает:
+		// конец и начало там в одной точке. Правило без основ должно молчать
+		// всегда, иначе объект без названия получит форму жилья из ниоткуда.
+		return regexp.MustCompile(`\z.`)
 	}
 	quoted := make([]string, 0, len(stems))
 	for _, s := range stems {
 		quoted = append(quoted, regexp.QuoteMeta(s))
 	}
 	return regexp.MustCompile(`(?i)` + boundaryBefore + `(?:` + strings.Join(quoted, "|") + `)`)
+}
+
+// AnyWord — любое из слов (или словосочетаний) целиком, с границами по обе
+// стороны. Нужен там, где основы мало: «на дереве» как начало совпадает и с
+// «на деревенской улице», а это другое место.
+func AnyWord(words ...string) *regexp.Regexp {
+	if len(words) == 0 {
+		return regexp.MustCompile(`\z.`)
+	}
+	quoted := make([]string, 0, len(words))
+	for _, w := range words {
+		quoted = append(quoted, regexp.QuoteMeta(w))
+	}
+	return regexp.MustCompile(
+		`(?i)` + boundaryBefore + `(?:` + strings.Join(quoted, "|") + `)` + boundaryAfter,
+	)
 }

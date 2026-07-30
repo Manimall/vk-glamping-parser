@@ -90,10 +90,18 @@ func buildLocation(region, nearCity string) string {
 	return strings.Join(parts, ", ")
 }
 
-// generalHouseType — категория-свалка источника: под «Эко-дом» у него больше
-// двух третей каталога, и формы жилья это слово не сообщает. В типы не берём —
-// иначе раздел «Эко-дом» соберёт 69% объектов и перестанет что-либо значить.
-const generalHouseType = "эко-дом"
+// Слова, которые формой жилья НЕ являются и в типы не берутся.
+//
+// «Эко-дом» — категория-свалка источника: под ней больше двух третей каталога,
+// и раздел из неё собрал бы 69% объектов, перестав что-либо значить.
+//
+// «Номер» — тип размещения, а не форма дома: комната в корпусе. В нишевом
+// каталоге A-frame такой раздел не сужает выбор ничем, а у 13 объектов из 20 он
+// оказывался ЕДИНСТВЕННЫМ типом — то есть подменял собой отсутствие данных.
+var notHouseTypes = map[string]bool{
+	"Эко-дом": true,
+	"Номер":   true,
+}
 
 // houseTypes — формы жилья объекта. Пустой список означает «источник не
 // сказал»: гадать по названию нельзя, «Дом у озера» может быть чем угодно.
@@ -107,11 +115,13 @@ func houseTypes(types []apiType) []string {
 	seen := make(map[string]bool, len(types))
 	for _, t := range types {
 		name := strings.TrimSpace(t.Name)
-		if name == "" || strings.EqualFold(name, generalHouseType) {
+		if name == "" {
 			continue
 		}
+		// Сравниваем ПОСЛЕ канонизации: «Эко дом» и «экодом» пишутся по-разному,
+		// а означают одно и то же.
 		canon := canonHouseType(name)
-		if seen[canon] {
+		if notHouseTypes[canon] || seen[canon] {
 			continue
 		}
 		seen[canon] = true

@@ -24,6 +24,13 @@ func retryTestClient(timeout time.Duration) *Client {
 // есть код повторов существовал, а повторов не было: прогон по-прежнему
 // заканчивался пустым регионом.
 func TestDoWithRetry_RetriesSlowSource(t *testing.T) {
+	// Паузы между попытками не выдерживаем: проверяем, что повтор ПРОИСХОДИТ, а
+	// не сколько мы готовы ждать. Без этого тест занимал девять секунд — ровно
+	// те, ради экономии которых retryBaseDelay и сделана переменной.
+	saved := retryBaseDelay
+	retryBaseDelay = time.Millisecond
+	defer func() { retryBaseDelay = saved }()
+
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&hits, 1)

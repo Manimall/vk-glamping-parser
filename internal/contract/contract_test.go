@@ -130,3 +130,48 @@ func TestObject_JSON_KeepsFilledFilterFields(t *testing.T) {
 		}
 	}
 }
+
+// Каталог фильтруется на клиенте по загруженному списку, а список — это
+// Preview. Поле, не доехавшее сюда, делает фильтр по себе невозможным: именно
+// так чипсы каталога и оказались мёртвыми — они читали tags, которых в Preview
+// нет и не было.
+func TestToPreview_CarriesFilterFields(t *testing.T) {
+	no := false
+	full := Object{
+		Slug: "x", Title: "Объект",
+		Surroundings: []string{"Лес", "Река"},
+		PetsAllowed:  &no,
+		GuestsMax:    6,
+		PriceValue:   7360,
+		Rating:       4.8,
+		Cabins:       []Cabin{{Price: "7 360 ₽"}},
+	}
+	p := full.ToPreview()
+
+	if len(p.Surroundings) != 2 || p.Surroundings[0] != "Лес" {
+		t.Errorf("surroundings=%v", p.Surroundings)
+	}
+	if p.PetsAllowed == nil || *p.PetsAllowed != false {
+		t.Errorf("petsAllowed=%v — явное «нельзя» обязано доехать", p.PetsAllowed)
+	}
+	if p.GuestsMax != 6 || p.PriceValue != 7360 || p.Rating != 4.8 {
+		t.Errorf("guestsMax=%d priceValue=%d rating=%v", p.GuestsMax, p.PriceValue, p.Rating)
+	}
+	if p.Price != "7 360 ₽" {
+		t.Errorf("price=%q — строка для показа осталась на месте", p.Price)
+	}
+}
+
+// Молчание источника обязано остаться молчанием и в превью: ноль в JSON фронт
+// прочитает как «0 ₽» и «0 гостей».
+func TestToPreview_OmitsUnknownFilterFields(t *testing.T) {
+	raw, err := json.Marshal(Object{Slug: "x"}.ToPreview())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"surroundings", "petsAllowed", "guestsMax", "priceValue", "rating"} {
+		if strings.Contains(string(raw), `"`+field+`"`) {
+			t.Errorf("пустое поле %q попало в превью: %s", field, raw)
+		}
+	}
+}

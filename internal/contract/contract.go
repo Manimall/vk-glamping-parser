@@ -118,10 +118,26 @@ type Preview struct {
 	// Region — ось группировки: по нему фильтруется каталог и работает мастер
 	// подбора бота. Locality/NearCity в плитку не кладём — они нужны только на
 	// карточке объекта, а Preview намеренно облегчённый.
-	Region string       `json:"region,omitempty"`
-	Cover  string       `json:"cover,omitempty"`
-	Price  string       `json:"price,omitempty"` // цена первого домика («7 000 ₽»)
-	Seo    *extract.SEO `json:"seo,omitempty"`   // OG-тексты для шаринга ссылки
+	Region string `json:"region,omitempty"`
+	Cover  string `json:"cover,omitempty"`
+	Price  string `json:"price,omitempty"` // цена первого домика («7 000 ₽»)
+
+	// Поля фильтров. Каталог фильтруется на клиенте по загруженному списку, а
+	// список — это Preview: чего здесь нет, по тому и не отфильтруешь. Отсюда
+	// исключение из правила «Preview облегчённая»: эти поля не для показа в
+	// плитке, а ради того, чтобы фильтр вообще стал возможен.
+	//
+	// Взято ровно то, что реально сужает выборку (охват на 309 объектах):
+	// вместимость 305, окружение 294, цена 307, питомцы 301, рейтинг 275.
+	// houseTypes сюда НЕ берём: фильтр по форме дома отложен, а охват 146 из
+	// 309 — половина каталога молчит.
+	Surroundings []string `json:"surroundings,omitempty"`
+	PetsAllowed  *bool    `json:"petsAllowed,omitempty"`
+	GuestsMax    int      `json:"guestsMax,omitempty"`
+	PriceValue   int      `json:"priceValue,omitempty"`
+	Rating       float64  `json:"rating,omitempty"`
+
+	Seo *extract.SEO `json:"seo,omitempty"` // OG-тексты для шаринга ссылки
 }
 
 // ToPreview собирает превью из полной карточки (цена — у первого домика).
@@ -131,7 +147,16 @@ type Preview struct {
 // (чистое преобразование). Указательный ресивер (o *Object) брали бы для
 // мутаций или чтобы не копировать крупную структуру.
 func (o Object) ToPreview() Preview {
-	p := Preview{Slug: o.Slug, Title: o.Title, Location: o.Location, Region: o.Region, Cover: o.Cover, Seo: o.Seo}
+	p := Preview{
+		Slug: o.Slug, Title: o.Title, Location: o.Location, Region: o.Region,
+		Cover: o.Cover, Seo: o.Seo,
+
+		Surroundings: o.Surroundings,
+		PetsAllowed:  o.PetsAllowed,
+		GuestsMax:    o.GuestsMax,
+		PriceValue:   o.PriceValue,
+		Rating:       o.Rating,
+	}
 	if len(o.Cabins) > 0 {
 		p.Price = o.Cabins[0].Price
 	}

@@ -24,7 +24,7 @@ func fullDetail() *detailData {
 		CheckIn:     "14:00", CheckOut: "12:00",
 		Rating: "5.0", Reviews: 41,
 		Photos:    []string{"d1.webp", "d2.webp", "d3.webp"},
-		Amenities: []string{"Мангальная зона", "Парковка"},
+		Amenities: []string{"Мангальная зона", "Парковка", "Интернет"},
 		Rules:     []string{"Бесплатная отмена за 7 дней."},
 		Guests:    6, Area: "80 м²",
 	}
@@ -51,8 +51,9 @@ func TestMergeDetail(t *testing.T) {
 	if len(cp.Rules) != 1 || cp.Rules[0] != "Бесплатная отмена за 7 дней." {
 		t.Errorf("rules: %v", cp.Rules)
 	}
-	// Удобства: услуги списка (нет) + amenityFeature (2), без дублей.
-	// Названия — настоящие: рубрики вроде «Интернет» отсеет cleanAmenities.
+	// Удобства: услуги списка (нет) + amenityFeature (3, из них «Интернет» —
+	// рубрика). Ждём 2: тот же ассерт проверяет и слияние, и то, что
+	// cleanAmenities реально вызван — без него рубрика прошла бы насквозь.
 	if len(cp.AmenityGroups) != 1 || len(cp.AmenityGroups[0].Items) != 2 {
 		t.Errorf("amenities: %+v", cp.AmenityGroups)
 	}

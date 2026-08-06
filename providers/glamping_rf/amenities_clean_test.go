@@ -30,6 +30,26 @@ func TestCleanAmenitiesDropsOrphanValues(t *testing.T) {
 	}
 }
 
+// «Можно только с согласованием» — не сирота, а единственный носитель смысла:
+// у обоих объектов с этой строкой petsAllowed=null. Убрав её, гость вместо
+// «можно по согласованию» получил бы молчание.
+func TestCleanAmenitiesKeepsConditionalPets(t *testing.T) {
+	got := cleanAmenities([]string{"Домашние животные", "Можно только с согласованием"})
+	want := []string{"Можно только с согласованием"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("условие про питомцев потеряно:\n got %v\nwant %v", got, want)
+	}
+}
+
+// Рубрика мероприятий приходит в хвосте, рядом с её же конкретным значением.
+func TestCleanAmenitiesDropsEventsRubric(t *testing.T) {
+	got := cleanAmenities([]string{"Подходит для проведения мероприятий", "Праздничные и корпоративные мероприятия"})
+	want := []string{"Подходит для проведения мероприятий"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("рубрика мероприятий не отсеяна:\n got %v\nwant %v", got, want)
+	}
+}
+
 // Рубрика «Интернет» стоит рядом с конкретным «WI-FI» у 289 объектов из 300 —
 // в списке это выглядит как два разных удобства.
 func TestCleanAmenitiesCollapsesInternet(t *testing.T) {
@@ -41,7 +61,7 @@ func TestCleanAmenitiesCollapsesInternet(t *testing.T) {
 }
 
 func TestCleanAmenitiesCanonicalizesSpelling(t *testing.T) {
-	got := cleanAmenities([]string{"WI-FI", "Wi-Fi", "wifi", "Микроволновка", "Микроволновая печь"})
+	got := cleanAmenities([]string{"WI-FI", "Wi-Fi", "wifi", "Микроволновая печь"})
 	want := []string{"Wi-Fi", "Микроволновая печь"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("написания не сведены:\n got %v\nwant %v", got, want)

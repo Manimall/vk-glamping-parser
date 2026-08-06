@@ -3,47 +3,93 @@ package glamping_rf
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
-// Источник кладёт в одно описание услуги несколько вариантов с разными ценами:
-// «Аренда Большая баня до 20 чел стоимость 50 000 руб. Таежная баня с чаном до
-// 6 чел стоимость 12 000 руб». priceFromDesc берёт первое совпадение — и объект
-// на 7 гостей получал ценник бани на двадцать человек. Гость видит 50 000 при
-// цене ночи 8 100 и уходит, а подходящий вариант до него не доезжает.
+// Источник кладёт в одно описание услуги и её варианты, и прайс мелких
+// расходников: «Аренда Большая баня до 20 чел стоимость 50 000 руб. Таежная
+// баня с чаном до 6 чел стоимость 12 000 руб» — но рядом бывает и «веник
+// дубовый 500 р», «шапочка для бани 250 руб», «соль для ванны 500 ₽».
 //
-// Показываем нижнюю границу с пометкой «от»: она честна (такая цена
-// действительно есть) и не отпугивает. Точный вариант гость уточнит в заявке —
-// у нас лид-модель, а не оплата на сайте.
+// priceFromDesc берёт первое совпадение — и объект на 7 гостей получал ценник
+// бани на двадцать человек. Брать вместо этого минимум по всему описанию
+// нельзя: на выгрузке 309 объектов такой подход чинил 4 случая и ломал 30 —
+// ценой услуги становился веник.
+//
+// Поэтому вариант засчитывается, только если в нём НАЗВАНА сама услуга.
+// «Таежная баня … 12 000» проходит, «веник дубовый 500 р» — нет, потому что
+// слова «баня» в нём нет. Из засчитанных берём нижнюю границу с пометкой «от»:
+// она честна (такая цена есть) и не отпугивает, а точный вариант гость уточнит
+// в заявке — у нас лид-модель, а не оплата на сайте.
 
-// Варианты разделены концом предложения. Точка внутри числа («50 000.» в конце)
-// не мешает: разделителем считается точка с пробелом или переводом строки.
+// Варианты разделены концом предложения.
 var sentenceSplitRe = regexp.MustCompile(`(?:\.\s+|\n+|;\s*)`)
 
-// Доплаты и надбавки — не самостоятельная цена услуги, а прибавка к ней.
-// Без этого «Базовая аренда 5000. Каждый последующий день: доплата 3500»
-// схлопнулось бы в «от 3 500 ₽», хотя аренда стоит 5 000.
-var surchargeRe = regexp.MustCompile(`(?i)доплат|последующ|дополнительн|сверх|каждый\s+след|за\s+каждого`)
+// Доплаты и надбавки — прибавка к цене, а не сама цена. Ищем в окне ВОКРУГ
+// числа, а не по всему предложению: «Стоимость за 2 часа 5 000 ₽, каждый
+// последующий час 2 500 ₽» — здесь первая цена законна, и отбрасывать всё
+// предложение целиком нельзя.
+var surchargeRe = regexp.MustCompile(`(?i)доплат|последующ|дополнительн|сверх|каждый\s+след|за\s+каждого|продлен|повторн|растопка`)
 
-// priceVariants разбирает описание на самостоятельные варианты и возвращает их
-// цены в рублях. Меньше двух вариантов — nil: тогда работает обычный разбор.
-func priceVariants(desc string) []int {
+// Окно вокруг числа, в котором ищем признак доплаты или почасовой цены.
+const priceContextWindow = 32
+
+// Расходники и мелочь из того же прайса. Имя услуги в них часто есть — «шапочка
+// для бани», «веник для бани», — поэтому одной проверки на имя мало: без этого
+// списка ценой бани становились 250 ₽ за шапочку.
+var consumableRe = regexp.MustCompile(`(?i)веник|шапочк|тапочк|полотенц|простын|халат|соль|масл|запарк|наполнен|чай|кофе|уголь|розжиг|дров|мыл|шампун|гель|аромат`)
+
+// Имя услуги в описании ищем по корню: «Баня» → «бан» найдёт и «баня»,
+// и «бани», и «баню». Двух букв мало (даст ложные совпадения), поэтому корень
+// не короче четырёх.
+const minStemLen = 4
+
+// serviceStem — корень названия услуги для поиска в тексте варианта.
+func serviceStem(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	// Берём первое слово: «Горячий чан» → искать надо «чан», а не «горячий».
+	fields := strings.Fields(name)
+	if len(fields) == 0 {
+		return ""
+	}
+	// Существительное обычно последнее: «Горячий чан» → «чан», а не «горячий».
+	stem := []rune(fields[len(fields)-1])
+	if len(stem) < minStemLen {
+		return string(stem) // короткое имя вроде «чан» ищем целиком
+	}
+	return string(stem[:len(stem)-1]) // «баня» → «бан», ловит и «бани», и «баню»
+}
+
+// priceVariants — цены вариантов ИМЕННО этой услуги. Меньше двух — nil, тогда
+// работает обычный разбор.
+func priceVariants(desc, serviceName string) []int {
+	stem := serviceStem(serviceName)
+	if stem == "" {
+		return nil
+	}
 	parts := sentenceSplitRe.Split(desc, -1)
 	if len(parts) < 2 {
 		return nil
 	}
+	seen := make(map[int]bool)
 	var prices []int
 	for _, part := range parts {
-		if strings.TrimSpace(part) == "" || surchargeRe.MatchString(part) {
+		lower := strings.ToLower(part)
+		if !strings.Contains(lower, stem) {
+			continue // вариант не про эту услугу — залог, чужой прайс, доплата
+		}
+		if consumableRe.MatchString(lower) {
+			continue // «шапочка для бани» называет услугу, но ценой не является
+		}
+		n, idx := priceInPart(part)
+		if n <= 0 {
 			continue
 		}
-		// Почасовые и сеансовые цены в сравнение не берём: «5 000 ₽ за 3 ч»
-		// и «12 000 ₽ за всё» — разные величины, минимум из них бессмыслен.
-		if perHourRe.MatchString(part) || hourlyRe.MatchString(part) {
+		if isSurchargeOrHourly(part, idx) || seen[n] {
 			continue
 		}
-		if n := priceInPart(part); n > 0 {
-			prices = append(prices, n)
-		}
+		seen[n] = true
+		prices = append(prices, n)
 	}
 	if len(prices) < 2 {
 		return nil
@@ -51,18 +97,35 @@ func priceVariants(desc string) []int {
 	return prices
 }
 
-// priceInPart — цена одного варианта, теми же правилами, что и priceFromDesc.
-func priceInPart(part string) int {
-	if m := priceRe.FindStringSubmatch(part); m != nil {
-		return parseDigits(m[1])
+// isSurchargeOrHourly — доплата или почасовая цена рядом с числом.
+//
+// Маркер доплаты ищем СЛЕВА от числа, во всём префиксе: «Повторная топка чана
+// без замены воды 3500 руб» — слово стоит в начале, а число в конце. Но именно
+// слева, а не по всему предложению: в «стоимость за 2 часа 5 000 ₽, каждый
+// последующий час 2 500 ₽» первая цена законна, и маркер второй её не касается.
+//
+// Почасовой суффикс — справа, в узком окне: «5000 рублей в час».
+func isSurchargeOrHourly(part string, idx int) bool {
+	if surchargeRe.MatchString(part[:idx]) {
+		return true
 	}
-	if m := costWordRe.FindStringSubmatch(part); m != nil {
-		return parseDigits(m[1])
-	}
-	return 0
+	to := min(len(part), idx+priceContextWindow)
+	tail := part[idx:to]
+	return hourlyRe.MatchString(tail) || perHourRe.MatchString(tail)
 }
 
-// lowestPrice — минимум из вариантов.
+// priceInPart — цена варианта и позиция её начала.
+func priceInPart(part string) (int, int) {
+	if loc := priceRe.FindStringSubmatchIndex(part); loc != nil {
+		return parseDigits(part[loc[2]:loc[3]]), loc[2]
+	}
+	if loc := costWordRe.FindStringSubmatchIndex(part); loc != nil {
+		return parseDigits(part[loc[2]:loc[3]]), loc[2]
+	}
+	return 0, 0
+}
+
+// lowestPrice — нижняя граница вариантов.
 func lowestPrice(prices []int) int {
 	lowest := prices[0]
 	for _, p := range prices[1:] {
@@ -71,4 +134,24 @@ func lowestPrice(prices []int) int {
 		}
 	}
 	return lowest
+}
+
+// normalizeDigits — цифры числа без любых пробельных разделителей и точки
+// между цифрами. Источник пишет «1 500» тонким пробелом U+2009 и «1.500»
+// точкой; ASCII-класс \s их не ловит, и число разбиралось как 500.
+func normalizeDigits(s string) string {
+	var b strings.Builder
+	runes := []rune(s)
+	for i, r := range runes {
+		switch {
+		case unicode.IsDigit(r):
+			b.WriteRune(r)
+		case r == '.' && i > 0 && i+1 < len(runes) &&
+			unicode.IsDigit(runes[i-1]) && unicode.IsDigit(runes[i+1]):
+			// разделитель тысяч — пропускаем
+		case unicode.IsSpace(r):
+			// пробел любой ширины — пропускаем
+		}
+	}
+	return b.String()
 }

@@ -2,63 +2,120 @@ package glamping_rf
 
 import "testing"
 
-// Реальный случай «Удачного места» (объект на 7 гостей, ночь 8 100 ₽):
-// в одном описании баня на 20 человек и баня на 6, парсер брал первую.
-func TestPriceFromDescPicksLowestOfVariants(t *testing.T) {
+// Целевой случай: «Удачное место», объект на 7 гостей с ценой ночи 8 100 ₽.
+// Обе части описания называют баню, значит обе — настоящие варианты услуги.
+func TestPriceFromDescPicksLowestNamedVariant(t *testing.T) {
 	desc := "Аренда Большая баня до 20 чел стоимость 50 000 руб. Таежная баня с чаном до 6 чел стоимость 12 000 руб"
-	if got := priceFromDesc(desc); got != "от 12 000 ₽" {
+	if got := priceFromDesc(desc, "Баня"); got != "от 12 000 ₽" {
 		t.Errorf("ожидалось «от 12 000 ₽», получено %q", got)
 	}
 }
 
-// Доплата — не самостоятельная цена: без её отсева аренда за 5 000 превратилась
-// бы в «от 3 500 ₽», то есть в цену, по которой снять нельзя.
-func TestPriceFromDescIgnoresSurcharge(t *testing.T) {
-	cases := []struct{ desc, want string }{
-		{"Базовая аренда: 5000 рублей чана. Каждый последующий день: доплата 3500 рублей", "5 000 ₽"},
-		{"Аренда 7000 руб. Дополнительный час 1500 руб", "7 000 ₽"},
-		{"Стоимость 4000 руб. За каждого гостя сверх четырёх доплата 500 руб", "4 000 ₽"},
+// Главный класс ошибок, найденный ревью на 30 объектах: рядом с ценой услуги
+// лежит прайс расходников. Веник, шапочка и соль — не варианты бани, и цена
+// услуги от них меняться не должна.
+func TestPriceFromDescIgnoresConsumables(t *testing.T) {
+	cases := []struct{ desc, service, want string }{
+		{"Баня 5000 руб. Веник дубовый 500 р", "Баня", "5 000 ₽"},
+		{"Стоимость бани 6500 руб. Шапочка для Бани - 250руб", "Баня", "6 500 ₽"},
+		{"Чан 5000 ₽. Соль для ванны: 500₽", "Горячий чан", "5 000 ₽"},
+		{"Баня 5000 руб. Одноразовые тапочки — 100 ₽", "Баня", "5 000 ₽"},
+		{"Чан 6000 руб. Запарка 1500 рублей", "Чан", "6 000 ₽"},
 	}
 	for _, c := range cases {
-		if got := priceFromDesc(c.desc); got != c.want {
+		if got := priceFromDesc(c.desc, c.service); got != c.want {
+			t.Errorf("%q (%s):\n got %q\nwant %q", c.desc, c.service, got, c.want)
+		}
+	}
+}
+
+// Доплата стоит рядом с ценой в ОДНОМ предложении — отбрасывать предложение
+// целиком нельзя, иначе законная цена выпадает и минимумом становится расходник.
+func TestPriceFromDescKeepsPriceBesideSurcharge(t *testing.T) {
+	desc := "Баня: стоимость за 2 часа 5 000 ₽, каждый последующий час 2 500 ₽. Веник 100 р"
+	if got := priceFromDesc(desc, "Баня"); got != "5 000 ₽" {
+		t.Errorf("ожидалось «5 000 ₽», получено %q", got)
+	}
+}
+
+// Продление и повторная топка — надбавки, а не варианты.
+func TestPriceFromDescIgnoresExtensions(t *testing.T) {
+	cases := []struct{ desc, service, want string }{
+		{"Чан 7000 руб. Повторная топка чана без замены воды 3500 руб", "Чан", "7 000 ₽"},
+		{"Джакузи 7000 руб. Продление джакузи 1000 руб сутки", "Джакузи", "7 000 ₽"},
+	}
+	for _, c := range cases {
+		if got := priceFromDesc(c.desc, c.service); got != c.want {
 			t.Errorf("%q:\n got %q\nwant %q", c.desc, got, c.want)
 		}
 	}
 }
 
-// Одна цена — прежнее поведение, без пометки «от».
-func TestPriceFromDescSingleUnchanged(t *testing.T) {
-	cases := []struct{ desc, want string }{
-		{"Чан, купель стоимость 5000 руб на 3 часа", "5 000 ₽"},
-		{"Доплата 1500р/питомец", "1 500 ₽"},
-		{"", ""},
+// Источник пишет тысячи тонким пробелом и точкой. ASCII-класс \s их не ловил,
+// и «1 500» разбиралось как 500 — при выборе минимума такая цена побеждала бы.
+func TestParseDigitsHandlesSeparators(t *testing.T) {
+	cases := map[string]int{
+		"1\u2009500": 1500, // тонкий пробел
+		"1\u00a0500": 1500, // неразрывный
+		"1.500":      1500, // точка-разделитель
+		"1 500":      1500,
+		"350":        350,
 	}
-	for _, c := range cases {
-		if got := priceFromDesc(c.desc); got != c.want {
-			t.Errorf("%q:\n got %q\nwant %q", c.desc, got, c.want)
+	for in, want := range cases {
+		if got := parseDigits(in); got != want {
+			t.Errorf("parseDigits(%q) = %d, ожидал %d", in, got, want)
 		}
 	}
 }
 
-// Почасовую и «за всё» сравнивать нельзя — это разные величины, и минимум из
-// них не значит ничего. Такие описания идут прежним путём.
-func TestPriceVariantsSkipsHourly(t *testing.T) {
-	if got := priceVariants("Сауна 1500 ₽/час. Баня 12 000 руб за сутки"); got != nil {
-		t.Errorf("почасовая попала в сравнение: %v", got)
-	}
-}
-
-func TestPriceVariantsNeedsTwo(t *testing.T) {
-	if got := priceVariants("Баня 12 000 руб"); got != nil {
+// Одна названная цена — прежнее поведение без пометки.
+func TestPriceVariantsNeedsTwoNamed(t *testing.T) {
+	if got := priceVariants("Баня 12 000 руб. Полотенца включены", "Баня"); got != nil {
 		t.Errorf("одна цена не должна давать варианты: %v", got)
 	}
-	if got := priceVariants("Баня 12 000 руб. Полотенца включены"); got != nil {
-		t.Errorf("вариант без цены не считается: %v", got)
+	if got := priceVariants("Баня 12 000 руб. Веник 500 р", "Баня"); got != nil {
+		t.Errorf("расходник не вариант: %v", got)
 	}
 }
 
-func TestLowestPrice(t *testing.T) {
-	if got := lowestPrice([]int{50000, 12000, 30000}); got != 12000 {
-		t.Errorf("ожидалось 12000, получено %d", got)
+// Одна и та же цена, названная дважды, — не два варианта.
+func TestPriceVariantsDedupes(t *testing.T) {
+	if got := priceVariants("Баня 6000 руб. Работает баня 6000 руб", "Баня"); got != nil {
+		t.Errorf("дубль цены не должен давать «от»: %v", got)
+	}
+}
+
+func TestServiceStem(t *testing.T) {
+	cases := map[string]string{
+		"Баня": "бан", "Горячий чан": "чан", "Купель Фурако": "фурак", "Сауна": "саун",
+	}
+	for in, want := range cases {
+		if got := serviceStem(in); got != want {
+			t.Errorf("serviceStem(%q) = %q, ожидал %q", in, got, want)
+		}
+	}
+}
+
+// Выдержки из реальных описаний, на которых ревью поймало регресс: старая
+// логика «минимум по всему описанию» превращала цену услуги в цену расходника.
+func TestPriceFromDescRealWorldRegressions(t *testing.T) {
+	cases := []struct{ slug, desc, service, want string }{
+		{"bereg-v-lesu-771", "Баня Скандик: стоимость за 2 часа 5 000 ₽. Одноразовые тапочки — 100 ₽", "Баня", "5 000 ₽"},
+		{"eko-kompleks-1342", "Баня на дровах 6 000 руб. Ароматное эфирное масло 200 рублей", "Баня", "6 000 ₽"},
+		{"ferma-na-reke-oke-1197", "Стоимость бани 6500 руб. Шапочка для Бани - 250руб", "Баня", "6 500 ₽"},
+		{"a-freym-v-ramenskom-2030", "Баня 6000 руб. веник дубовый 500р", "Баня", "6 000 ₽"},
+		{"eko-otdyh-1612", "Горячий чан 5000 руб. Соль для ванны: 500₽", "Горячий чан", "5 000 ₽"},
+		{"usadba-u-reki-1971", "Чан 3000 руб. -халат махровый - 500 руб", "Чан", "3 000 ₽"},
+		{"dom-relaks-1908", "Чан 6000 рублей. Запарка для чана 1500 рублей", "Чан", "6 000 ₽"},
+		{"novoe-shale-2083", "Джакузи 7000 руб. Продление джакузи 1000 руб сутки", "Джакузи", "7 000 ₽"},
+		{"derevnya-ilino-959", "Чан 7000 руб. Повторная топка чана без замены воды 3500 руб", "Чан", "7 000 ₽"},
+		// А это настоящие варианты — их брать нужно.
+		{"udachnoe-mesto-489", "Аренда Большая баня до 20 чел стоимость 50 000 руб. Таежная баня с чаном до 6 чел стоимость 12 000 руб", "Баня", "от 12 000 ₽"},
+		{"zefirnyy-dom-678", "Большая баня 5000 руб. Маленькая баня 3 500 руб. Стоимость веника - 500 ₽", "Баня", "от 3 500 ₽"},
+	}
+	for _, c := range cases {
+		if got := priceFromDesc(c.desc, c.service); got != c.want {
+			t.Errorf("%s (%s):\n got %q\nwant %q", c.slug, c.service, got, c.want)
+		}
 	}
 }

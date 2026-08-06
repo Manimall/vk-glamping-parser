@@ -145,3 +145,63 @@ func TestBuildSEO_FallbackKeepsLocation(t *testing.T) {
 		t.Errorf("ожидал шаблон с локацией: %q", seo.Description)
 	}
 }
+
+func TestSuitable_AcceptsLeadingQuote(t *testing.T) {
+	// sentences считает кавычку законным началом предложения, и suitable не
+	// должен из-за неё отбрасывать живое описание курируемого объекта.
+	s := `«Баня место силы» и дома с чаном, для отдыха с атмосферой уюта и эстетики`
+	if !suitable(s) {
+		t.Errorf("кандидат с ведущей кавычкой должен проходить: %q", s)
+	}
+}
+
+func TestSuitable_RejectsAnaphora(t *testing.T) {
+	// Предложение, вырванное из абзаца: без соседей не читается.
+	for _, s := range []string{
+		"Он предлагает уютную атмосферу благодаря собственной территории у леса",
+		"Однако это не единственное место релакса в доме на берегу озера",
+	} {
+		if suitable(s) {
+			t.Errorf("связка без антецедента не должна проходить: %q", s)
+		}
+	}
+}
+
+func TestSuitable_RejectsPrice(t *testing.T) {
+	if suitable("Банный чан на отдельном участке в лесу — 2500 рублей в час") {
+		t.Error("прайс-лист не должен попадать в сниппет")
+	}
+}
+
+func TestClauseHead_CutsAtComma(t *testing.T) {
+	s := "Уютное место для тех, кто ищет природу и настоящий отдых, вдали от городской суеты"
+	got := clauseHead(s, 60)
+	if got != "Уютное место для тех, кто ищет природу и настоящий отдых" {
+		t.Errorf("рез по границе клаузы: %q", got)
+	}
+}
+
+func TestClauseHead_NoBoundary(t *testing.T) {
+	// Границы нет — лучше отдать шаблон, чем обрубок посреди слова.
+	if got := clauseHead("Просторный дом с панорамными окнами в сосновом лесу", 30); got != "" {
+		t.Errorf("без запятой резать нечего: %q", got)
+	}
+}
+
+func TestFallbackPitch_FitsBudget(t *testing.T) {
+	// Длинная локация не должна выносить описание за лимит: инвариант обязан
+	// держаться на обеих ветках, а не только там, где нашёлся питч.
+	long := "Ивановская обл., Ивановский р-н, д. Крюково, Славянская ул., 6"
+	seo := BuildSEO(SEOInput{Name: "Scandi Villa (А-фрейм)", Location: long, About: "Забронировать: телеграм"})
+	if n := runes(seo.Description); n > seoDescTotalRunes {
+		t.Errorf("фоллбэк вышел за лимит: %d > %d — %q", n, seoDescTotalRunes, seo.Description)
+	}
+}
+
+func TestNormalizeAbout_UnicodeSpaces(t *testing.T) {
+	// \s в RE2 — только ASCII, поэтому U+2003 доживал до сниппета.
+	got := normalizeAbout("Отдых в бору")
+	if strings.Contains(got, " ") || strings.Contains(got, " ") {
+		t.Errorf("юникод-пробелы должны схлопываться: %q", got)
+	}
+}

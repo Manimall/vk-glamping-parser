@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // SEO-тексты объекта для превью в поиске и соцсетях. Генерятся из КОНТЕНТА
@@ -18,6 +19,8 @@ const (
 	seoCTA = "Бронь в три тапа."
 	// seoFallbackPitch — нейтральный питч, когда у объекта нет своего описания.
 	seoFallbackPitch = "уютный дом для отдыха на природе"
+	// seoJoin — то, что описание добавляет вокруг питча: « — » и «. ».
+	seoJoin = " — . "
 )
 
 // distanceRe выхватывает «живую» строку локации вида «18 км от Иваново» из
@@ -29,7 +32,7 @@ var emojiRe = regexp.MustCompile(`[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2190}-
 
 // junkLineRe — строки описания, не относящиеся к презентации места (бронь,
 // контакты, цена): их в SEO-описание не берём.
-var junkLineRe = regexp.MustCompile(`(?i)(заброн|свободные дат|сообщени|telegram|вконтакт|http|@|☎|whatsapp|цена|стоимость|₽)`)
+var junkLineRe = regexp.MustCompile(`(?i)(заброн|свободные дат|сообщени|telegram|вконтакт|http|@|☎|whatsapp|цена|стоимость|₽|\d[\d ,.]*\s*руб|доп\.?\s*плат|за отдельную плату|платн(ая|ую|ой|ым)|скидк|прайс)`)
 
 // SEO — заголовок/описание для мета-тегов и короткая строка локации для OG.
 type SEO struct {
@@ -76,16 +79,32 @@ func BuildSEO(in SEOInput) SEO {
 // ломал имена собственные («Сабадури» → «сабадури», «Купель Фурако» →
 // «купель»), а «Имя — Предложение» типографски корректно.
 func buildDescription(name, subtitle, about string) string {
-	budget := seoDescTotalRunes - len([]rune(name)) - len([]rune(seoCTA)) - len(" — . ")
-	pitch := pickPitch(about, name, budget)
-	if pitch == "" {
-		pitch = seoFallbackPitch
-		if subtitle != "" {
-			pitch = fmt.Sprintf("%s, %s", seoFallbackPitch, subtitle)
-		}
+	// Руны, а не байты: len(" — . ") даёт 7 при пяти символах — тире занимает
+	// три байта, и бюджет молча терял два символа у каждого объекта.
+	budget := seoDescTotalRunes - runes(name) - runes(seoCTA) - runes(seoJoin)
+	if pitch := pickPitch(about, name, budget); pitch != "" {
+		return fmt.Sprintf("%s — %s. %s", name, pitch, seoCTA)
 	}
-	return fmt.Sprintf("%s — %s. %s", name, pitch, seoCTA)
+	return fmt.Sprintf("%s — %s. %s", name, fallbackPitch(subtitle, budget), seoCTA)
 }
+
+// fallbackPitch — нейтральный шаблон с локацией, если своего текста нет.
+// Локация приезжает из данных и бывает длинной («Ивановская обл., Ивановский
+// р-н, д. Крюково, Славянская ул., 6»), поэтому её тоже держим в бюджете:
+// иначе инвариант «описание не длиннее лимита» верен только для одной из
+// двух веток.
+func fallbackPitch(subtitle string, budget int) string {
+	if subtitle == "" {
+		return seoFallbackPitch
+	}
+	full := fmt.Sprintf("%s, %s", seoFallbackPitch, subtitle)
+	if runes(full) <= budget {
+		return full
+	}
+	return seoFallbackPitch
+}
+
+func runes(s string) int { return utf8.RuneCountInString(s) }
 
 // locationHighlight — «живая» строка локации: если в описании есть «N км от
 // Города» — берём её (точнее и привлекательнее адреса), иначе структурный адрес.

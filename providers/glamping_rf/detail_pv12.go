@@ -76,6 +76,11 @@ func detailPaidExtras(rooms map[string]pv12RoomWithSpecs) []extract.Extra {
 // Честность прайса: почасовую/сеансовую нельзя выдавать за цену «за всё» —
 // суффикс «/час» или «за N ч». Нет распознаваемой цены — пустая строка.
 func priceFromDesc(desc string) string {
+	// Несколько самостоятельных вариантов в одном описании — показываем нижнюю
+	// границу: первое совпадение может оказаться баней на 20 человек.
+	if prices := priceVariants(desc); prices != nil {
+		return "от " + formatRub(lowestPrice(prices))
+	}
 	if loc := priceRe.FindStringSubmatchIndex(desc); loc != nil {
 		n := parseDigits(desc[loc[2]:loc[3]])
 		if n <= 0 {

@@ -24,7 +24,7 @@ func fullDetail() *detailData {
 		CheckIn:     "14:00", CheckOut: "12:00",
 		Rating: "5.0", Reviews: 41,
 		Photos:    []string{"d1.webp", "d2.webp", "d3.webp"},
-		Amenities: []string{"Интернет", "Парковка"},
+		Amenities: []string{"Мангальная зона", "Парковка"},
 		Rules:     []string{"Бесплатная отмена за 7 дней."},
 		Guests:    6, Area: "80 м²",
 	}
@@ -52,6 +52,7 @@ func TestMergeDetail(t *testing.T) {
 		t.Errorf("rules: %v", cp.Rules)
 	}
 	// Удобства: услуги списка (нет) + amenityFeature (2), без дублей.
+	// Названия — настоящие: рубрики вроде «Интернет» отсеет cleanAmenities.
 	if len(cp.AmenityGroups) != 1 || len(cp.AmenityGroups[0].Items) != 2 {
 		t.Errorf("amenities: %+v", cp.AmenityGroups)
 	}

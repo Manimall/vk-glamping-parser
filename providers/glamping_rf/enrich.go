@@ -135,6 +135,10 @@ func mergeAmenities(groups []extract.AmenityGroup, names []string) []extract.Ame
 		take(g.Items)
 	}
 	take(names)
+	// Рубрики источника («Территория», «Дети») и осиротевшие значения
+	// («Нельзя») приходят вперемешку с удобствами — чистим на выходе, чтобы
+	// ни карточка, ни бот их не показывали.
+	items = cleanAmenities(items)
 	if len(items) == 0 {
 		return nil
 	}

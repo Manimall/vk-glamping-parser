@@ -28,7 +28,7 @@ type pv12Amenity struct {
 // буква/цифра либо конец строки: \b в Go ASCII-only и кириллицу не понимает
 // (та же грабля, что с «от» в isRangePrice фронта) — из-за неё «6000р.»
 // раньше оставался без цены.
-var priceRe = regexp.MustCompile(`(\d[\d\s]{2,}|\d{3,})\s*(?:₽|руб|р(?:[^а-яё0-9]|$))`)
+var priceRe = regexp.MustCompile(`(\d[\d\s\x{00a0}\x{2009}\x{202f}.]{2,}|\d{3,})\s*(?:₽|руб|р(?:[^а-яё0-9]|$))`)
 
 // perHourRe — цена без валюты в формате «2500/час» или «15000/3 часа»
 // (сеанс из N часов). Группа 2 — длительность сеанса, если указана.
@@ -64,7 +64,7 @@ func detailPaidExtras(rooms map[string]pv12RoomWithSpecs) []extract.Extra {
 				continue
 			}
 			seen[name] = true
-			extras = append(extras, extract.Extra{Name: name, Price: priceFromDesc(a.Desc)})
+			extras = append(extras, extract.Extra{Name: name, Price: priceFromDesc(a.Desc, name)})
 		}
 	}
 	return extras
@@ -75,7 +75,12 @@ func detailPaidExtras(rooms map[string]pv12RoomWithSpecs) []extract.Extra {
 // сеанс «15000/3 часа»; «Стоимость сеанса 10000»; описание из одного числа.
 // Честность прайса: почасовую/сеансовую нельзя выдавать за цену «за всё» —
 // суффикс «/час» или «за N ч». Нет распознаваемой цены — пустая строка.
-func priceFromDesc(desc string) string {
+func priceFromDesc(desc, serviceName string) string {
+	// Несколько вариантов ИМЕННО этой услуги — показываем нижнюю границу:
+	// первое совпадение может оказаться баней на 20 человек.
+	if prices := priceVariants(desc, serviceName); prices != nil {
+		return "от " + formatRub(lowestPrice(prices))
+	}
 	if loc := priceRe.FindStringSubmatchIndex(desc); loc != nil {
 		n := parseDigits(desc[loc[2]:loc[3]])
 		if n <= 0 {
@@ -110,7 +115,7 @@ func priceFromDesc(desc string) string {
 
 // parseDigits — число из строки с пробелами-разделителями («15 000» → 15000).
 func parseDigits(s string) int {
-	n, err := strconv.Atoi(strings.ReplaceAll(s, " ", ""))
+	n, err := strconv.Atoi(normalizeDigits(s))
 	if err != nil {
 		return 0
 	}

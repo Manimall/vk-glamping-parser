@@ -94,7 +94,7 @@ func TestPriceFromDesc(t *testing.T) {
 		"на высоте 1500 метров":                "", // число без валюты в тексте — не цена
 	}
 	for desc, want := range cases {
-		if got := priceFromDesc(desc); got != want {
+		if got := priceFromDesc(desc, "Услуга"); got != want {
 			t.Errorf("priceFromDesc(%q) = %q, ожидал %q", desc, got, want)
 		}
 	}

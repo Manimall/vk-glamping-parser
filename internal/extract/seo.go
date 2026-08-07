@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode"
+	"unicode/utf8"
 )
 
 // SEO-тексты объекта для превью в поиске и соцсетях. Генерятся из КОНТЕНТА
@@ -17,12 +17,10 @@ import (
 const (
 	// seoCTA — призыв к брони в конце описания (единый стиль карточек сайта).
 	seoCTA = "Бронь в три тапа."
-	// seoDescMaxRunes — мягкий предел длины «питча» (без имени и CTA).
-	seoDescMaxRunes = 160
-	// seoMinRichRunes — ниже этого «питч» считаем бедным → берём шаблон-фоллбэк.
-	seoMinRichRunes = 30
 	// seoFallbackPitch — нейтральный питч, когда у объекта нет своего описания.
 	seoFallbackPitch = "уютный дом для отдыха на природе"
+	// seoJoin — то, что описание добавляет вокруг питча: « — » и «. ».
+	seoJoin = " — . "
 )
 
 // distanceRe выхватывает «живую» строку локации вида «18 км от Иваново» из
@@ -34,7 +32,7 @@ var emojiRe = regexp.MustCompile(`[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2190}-
 
 // junkLineRe — строки описания, не относящиеся к презентации места (бронь,
 // контакты, цена): их в SEO-описание не берём.
-var junkLineRe = regexp.MustCompile(`(?i)(заброн|свободные дат|сообщени|telegram|вконтакт|http|@|☎|whatsapp|цена|стоимость|₽)`)
+var junkLineRe = regexp.MustCompile(`(?i)(заброн|свободные дат|сообщени|telegram|вконтакт|http|@|☎|whatsapp|цена|стоимость|₽|\d[\d ,.]*\s*руб|доп\.?\s*плат|за отдельную плату|платн(ая|ую|ой|ым)|скидк|прайс)`)
 
 // SEO — заголовок/описание для мета-тегов и короткая строка локации для OG.
 type SEO struct {
@@ -71,48 +69,42 @@ func BuildSEO(in SEOInput) SEO {
 	}
 }
 
-// buildDescription — «<Имя> — <питч>. Бронь в три тапа.». Питч — собственный
-// текст объекта (что за место, почему стоит), иначе нейтральный фоллбэк с локацией.
+// buildDescription — «<Имя> — <питч>. Бронь в три тапа.».
+//
+// Бюджет считается от ВСЕЙ строки, а не от одного питча: имя и призыв
+// прибавляются сверху, и лимит на питч не мешал описанию вырасти до 2881
+// символа при объявленных 160.
+//
+// Питч берётся целым предложением с заглавной буквы — lowerFirst убран: он
+// ломал имена собственные («Сабадури» → «сабадури», «Купель Фурако» →
+// «купель»), а «Имя — Предложение» типографски корректно.
 func buildDescription(name, subtitle, about string) string {
-	pitch := aboutPitch(about)
-	if pitch == "" {
-		pitch = seoFallbackPitch
-		if subtitle != "" {
-			pitch = fmt.Sprintf("%s, %s", seoFallbackPitch, subtitle)
-		}
-	} else {
-		pitch = lowerFirst(pitch) // после «Имя — » питч идёт с маленькой буквы
+	// Руны, а не байты: len(" — . ") даёт 7 при пяти символах — тире занимает
+	// три байта, и бюджет молча терял два символа у каждого объекта.
+	budget := seoDescTotalRunes - runes(name) - runes(seoCTA) - runes(seoJoin)
+	if pitch := pickPitch(about, name, budget); pitch != "" {
+		return fmt.Sprintf("%s — %s. %s", name, pitch, seoCTA)
 	}
-	return fmt.Sprintf("%s — %s. %s", name, pitch, seoCTA)
+	return fmt.Sprintf("%s — %s. %s", name, fallbackPitch(subtitle, budget), seoCTA)
 }
 
-// aboutPitch собирает «питч» из описания сообщества: осмысленные строки (без
-// эмодзи и без строк про бронь/контакты/цену), склеенные в предложения, с мягким
-// лимитом длины. Пусто, если своего описания мало (тогда buildDescription берёт
-// фоллбэк).
-func aboutPitch(about string) string {
-	kept := make([]string, 0)
-	total := 0
-	for _, ln := range strings.Split(about, "\n") {
-		ln = strings.TrimSpace(emojiRe.ReplaceAllString(ln, ""))
-		ln = strings.Trim(ln, " .·—-")
-		// Строку-дистанцию («N км от Города») в питч не берём — она уже в Subtitle,
-		// иначе описание рубленое и длиннее (мета-описание режется на ~160).
-		if ln == "" || !hasLetter(ln) || junkLineRe.MatchString(ln) || distanceRe.MatchString(ln) {
-			continue
-		}
-		r := len([]rune(ln))
-		if len(kept) > 0 && total+r > seoDescMaxRunes {
-			break
-		}
-		kept = append(kept, ln)
-		total += r
+// fallbackPitch — нейтральный шаблон с локацией, если своего текста нет.
+// Локация приезжает из данных и бывает длинной («Ивановская обл., Ивановский
+// р-н, д. Крюково, Славянская ул., 6»), поэтому её тоже держим в бюджете:
+// иначе инвариант «описание не длиннее лимита» верен только для одной из
+// двух веток.
+func fallbackPitch(subtitle string, budget int) string {
+	if subtitle == "" {
+		return seoFallbackPitch
 	}
-	if total < seoMinRichRunes {
-		return ""
+	full := fmt.Sprintf("%s, %s", seoFallbackPitch, subtitle)
+	if runes(full) <= budget {
+		return full
 	}
-	return strings.Join(kept, ". ")
+	return seoFallbackPitch
 }
+
+func runes(s string) int { return utf8.RuneCountInString(s) }
 
 // locationHighlight — «живая» строка локации: если в описании есть «N км от
 // Города» — берём её (точнее и привлекательнее адреса), иначе структурный адрес.
@@ -121,25 +113,4 @@ func locationHighlight(about, fallback string) string {
 		return strings.Join(strings.Fields(m), " ") // нормализуем пробелы
 	}
 	return strings.TrimSpace(fallback)
-}
-
-// hasLetter — есть ли в строке хоть одна буква (отсекаем строки из одних символов/
-// невидимых, напр. «⠀» или «—»).
-func hasLetter(s string) bool {
-	for _, r := range s {
-		if unicode.IsLetter(r) {
-			return true
-		}
-	}
-	return false
-}
-
-// lowerFirst делает первую руну строчной (питч после «Имя — »).
-func lowerFirst(s string) string {
-	r := []rune(s)
-	if len(r) == 0 {
-		return s
-	}
-	r[0] = unicode.ToLower(r[0])
-	return string(r)
 }

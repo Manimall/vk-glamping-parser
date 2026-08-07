@@ -20,7 +20,7 @@ func leanObject() contract.Object {
 
 func fullDetail() *detailData {
 	return &detailData{
-		Description: "Богатое описание с детальной страницы.",
+		Description: "Уютный дом в сосновом лесу на берегу тихого озера.",
 		CheckIn:     "14:00", CheckOut: "12:00",
 		Rating: "5.0", Reviews: 41,
 		Photos:    []string{"d1.webp", "d2.webp", "d3.webp"},
@@ -34,7 +34,7 @@ func TestMergeDetail(t *testing.T) {
 	obj := leanObject()
 	mergeDetail(&obj, fullDetail())
 
-	if obj.About != "Богатое описание с детальной страницы." {
+	if obj.About != "Уютный дом в сосновом лесу на берегу тихого озера." {
 		t.Errorf("about: %q", obj.About)
 	}
 	if len(obj.Photos) != 3 { // detail-галерея заменила 1 превью списка
@@ -57,8 +57,10 @@ func TestMergeDetail(t *testing.T) {
 	if len(cp.AmenityGroups) != 1 || len(cp.AmenityGroups[0].Items) != 2 {
 		t.Errorf("amenities: %+v", cp.AmenityGroups)
 	}
-	// SEO пересобран из богатого описания (питч после «Имя — » идёт со строчной).
-	if obj.Seo == nil || !strings.Contains(obj.Seo.Description, "богатое описание") {
+	// SEO пересобран из обогащённого описания: питч берётся оттуда целым
+	// предложением и с заглавной буквы (lowerFirst убран — он калечил имена
+	// собственные).
+	if obj.Seo == nil || !strings.Contains(obj.Seo.Description, "Уютный дом в сосновом лесу") {
 		t.Errorf("seo: %+v", obj.Seo)
 	}
 	// Данные списка не затёрты.
@@ -130,7 +132,7 @@ func TestParse_EnrichesAndAppliesDefaults(t *testing.T) {
 		t.Fatalf("объектов: %d", len(out))
 	}
 	// Объект 1 обогащён detail-страницей.
-	if out[0].About != "Богатое описание с детальной страницы." {
+	if out[0].About != "Уютный дом в сосновом лесу на берегу тихого озера." {
 		t.Errorf("объект 1 не обогащён: %q", out[0].About)
 	}
 	// Объект 2: detail упал ТРАНЗИЕНТНО → оставлен с данными списка + дефолты.

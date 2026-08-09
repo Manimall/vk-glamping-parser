@@ -17,9 +17,8 @@ const amenitiesGroupTitle = "Удобства"
 // ровно ту же форму, что отдаёт VK-провайдер (фронту не нужны изменения).
 // Чистая функция: тестируется без сети.
 func toObject(it apiItem) contract.Object {
-	// Листинг отдаёт название с HTML-сущностями («&quot;Веденье&quot;») —
-	// detail-страницы декодируются, а этот путь не декодировался, и сущность
-	// уезжала в Title и в slug (baza-otdyha-quot-vedene-quot-838, issue #23).
+	// Листинг отдаёт название с HTML-сущностями — без декода они уезжали в
+	// Title и slug (issue #23).
 	title := html.UnescapeString(firstNonEmpty(it.NameNew, it.Name))
 	region := strings.TrimSpace(it.Place.Name)
 	nearCity := strings.TrimSpace(it.City.City)

@@ -13,8 +13,8 @@ func TestToObject_TitleHTMLEntities(t *testing.T) {
 	if o.Title != `База отдыха "Веденье"` {
 		t.Errorf("title=%q — сущности не декодированы", o.Title)
 	}
-	if o.Slug != "baza-otdyha-vedene-838" {
-		t.Errorf("slug=%q, ожидал baza-otdyha-vedene-838", o.Slug)
+	if o.Slug != "baza-otdyha-vedene" {
+		t.Errorf("slug=%q, ожидал baza-otdyha-vedene", o.Slug)
 	}
 	if o.Cabins[0].Title != o.Title {
 		t.Errorf("в кабину уехал недекодированный title: %q", o.Cabins[0].Title)

@@ -1,7 +1,6 @@
 package glamping_rf
 
 import (
-	"fmt"
 	"html"
 	"strings"
 
@@ -26,9 +25,10 @@ func toObject(it apiItem) contract.Object {
 	photos := collectPhotos(it)
 
 	obj := contract.Object{
-		// Слаг: транслит имени + id источника — уникален даже при одинаковых
-		// названиях («Деревня Ильино» id=959 → "derevnya-ilino-959").
-		Slug:     slug.Make(fmt.Sprintf("%s %d", title, it.ID)),
+		// Слаг — чистый транслит имени, без id (issue #26). Тёзки получают
+		// суффикс -2/-3 постобработкой dedupeSlugs, id живёт в SourceID.
+		Slug:     slug.Make(title),
+		SourceID: it.ID,
 		Title:    title,
 		Location: location,
 		Region:   region,

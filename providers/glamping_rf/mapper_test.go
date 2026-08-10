@@ -33,6 +33,10 @@ func TestToObject_Mapping(t *testing.T) {
 	if o.Title != "Деревня Ильино" { // name_new приоритетнее name
 		t.Fatalf("title=%q, ожидал name_new", o.Title)
 	}
+	// Запирает композицию слага и no-op декода на чистых названиях.
+	if o.Slug != "derevnya-ilino-959" {
+		t.Fatalf("slug=%q, ожидал derevnya-ilino-959", o.Slug)
+	}
 	if o.Location != "Тульская область" {
 		t.Fatalf("location=%q", o.Location)
 	}

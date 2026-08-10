@@ -2,6 +2,7 @@ package glamping_rf
 
 import (
 	"fmt"
+	"html"
 	"strings"
 
 	"vk-parser/internal/contract"
@@ -16,7 +17,9 @@ const amenitiesGroupTitle = "Удобства"
 // ровно ту же форму, что отдаёт VK-провайдер (фронту не нужны изменения).
 // Чистая функция: тестируется без сети.
 func toObject(it apiItem) contract.Object {
-	title := firstNonEmpty(it.NameNew, it.Name)
+	// Листинг отдаёт название с HTML-сущностями — без декода они уезжали в
+	// Title и slug (issue #23).
+	title := html.UnescapeString(firstNonEmpty(it.NameNew, it.Name))
 	region := strings.TrimSpace(it.Place.Name)
 	nearCity := strings.TrimSpace(it.City.City)
 	location := buildLocation(region, nearCity)

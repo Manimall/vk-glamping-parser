@@ -1,49 +1,38 @@
 package glamping_rf
 
-// Тёзки после ухода id из слага (issue #26): «Дома у озера» встречается трижды.
-// Правило: старший по SourceID держит чистый слаг НАВСЕГДА (id новичка всегда
-// больше — новый тёзка не отберёт URL у старожила), остальные — -2, -3 в
-// порядке возраста. Суффикс проверяется на занятость глобально: настоящий
-// объект «Дома у озера 2» не будет растоптан сгенерированным «-2».
-
+// Тёзки после ухода id из слага (issue #26): «Дома у озера» встречается
+// трижды. Правило (решение владельца 10.08): имя уникально в выдаче — слаг
+// чистый; есть тёзки — ВСЕ в группе остаются с id (doma-u-ozera-1579).
+// Id вечен, поэтому URL тёзок не зависят друг от друга: смерть или появление
+// соседа-тёзки никого не переименовывает. Известный трейд схемы: появление
+// тёзки у ранее уникального имени переводит и его на слаг с id.
 import (
 	"fmt"
-	"sort"
 
 	"vk-parser/internal/contract"
 )
 
 func dedupeSlugs(objects []contract.Object) []contract.Object {
-	byBase := make(map[string][]int, len(objects))
-	for i, o := range objects {
-		byBase[o.Slug] = append(byBase[o.Slug], i)
+	counts := make(map[string]int, len(objects))
+	for _, o := range objects {
+		counts[o.Slug]++
 	}
+	// Предрегистрация ВСЕХ баз (принцип из ревью PR #27): сгенерированный
+	// base-<id> не растопчет настоящее имя другого объекта («Дом 2»).
 	used := make(map[string]bool, len(objects))
-	for base, idxs := range byBase {
-		if len(idxs) == 1 {
-			used[base] = true
-		}
+	for s := range counts {
+		used[s] = true
 	}
-	for base, idxs := range byBase {
-		if len(idxs) == 1 {
+	for i, o := range objects {
+		if counts[o.Slug] < 2 {
 			continue
 		}
-		sort.Slice(idxs, func(a, b int) bool {
-			return objects[idxs[a]].SourceID < objects[idxs[b]].SourceID
-		})
-		for pos, i := range idxs {
-			candidate := base
-			if pos > 0 || used[base] {
-				for n := pos + 1; ; n++ {
-					candidate = fmt.Sprintf("%s-%d", base, n)
-					if !used[candidate] {
-						break
-					}
-				}
-			}
-			used[candidate] = true
-			objects[i].Slug = candidate
+		candidate := fmt.Sprintf("%s-%d", o.Slug, o.SourceID)
+		for used[candidate] {
+			candidate += "-2"
 		}
+		used[candidate] = true
+		objects[i].Slug = candidate
 	}
 	return objects
 }

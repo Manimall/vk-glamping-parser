@@ -8,10 +8,13 @@ package glamping_rf
 // тёзки у ранее уникального имени переводит и его на слаг с id.
 import (
 	"fmt"
+	"sort"
 
 	"vk-parser/internal/contract"
 )
 
+// dedupeSlugs полагается на инвариант «SourceID уникален и > 0» — его даёт
+// фильтр it.ID == 0 в collectPlace.
 func dedupeSlugs(objects []contract.Object) []contract.Object {
 	counts := make(map[string]int, len(objects))
 	for _, o := range objects {
@@ -23,11 +26,21 @@ func dedupeSlugs(objects []contract.Object) []contract.Object {
 	for s := range counts {
 		used[s] = true
 	}
+	// Тёзки обходятся по возрастанию SourceID: выдача не зависит от порядка
+	// листинга даже в ветке коллизии ниже.
+	homonyms := make([]int, 0, len(objects))
 	for i, o := range objects {
-		if counts[o.Slug] < 2 {
-			continue
+		if counts[o.Slug] > 1 {
+			homonyms = append(homonyms, i)
 		}
-		candidate := fmt.Sprintf("%s-%d", o.Slug, o.SourceID)
+	}
+	sort.Slice(homonyms, func(a, b int) bool {
+		return objects[homonyms[a]].SourceID < objects[homonyms[b]].SourceID
+	})
+	for _, i := range homonyms {
+		candidate := fmt.Sprintf("%s-%d", objects[i].Slug, objects[i].SourceID)
+		// Достижимо только когда base-<id> совпал с настоящим именем
+		// другого объекта («Дом 2»).
 		for used[candidate] {
 			candidate += "-2"
 		}

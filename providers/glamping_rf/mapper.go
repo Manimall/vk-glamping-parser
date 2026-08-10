@@ -1,6 +1,7 @@
 package glamping_rf
 
 import (
+	"fmt"
 	"html"
 	"strings"
 
@@ -24,10 +25,16 @@ func toObject(it apiItem) contract.Object {
 	location := buildLocation(region, nearCity)
 	photos := collectPhotos(it)
 
+	// Слаг — чистый транслит имени, без id (issue #26); тёзки получают суффикс
+	// -<sourceId> постобработкой dedupeSlugs. Пустое/нетранслитерируемое имя —
+	// fallback: объект без URL существовать не может.
+	objSlug := slug.Make(title)
+	if objSlug == "" {
+		objSlug = fmt.Sprintf("glamping-%d", it.ID)
+	}
+
 	obj := contract.Object{
-		// Слаг — чистый транслит имени, без id (issue #26). Тёзки получают
-		// суффикс -2/-3 постобработкой dedupeSlugs, id живёт в SourceID.
-		Slug:     slug.Make(title),
+		Slug:     objSlug,
 		SourceID: it.ID,
 		Title:    title,
 		Location: location,

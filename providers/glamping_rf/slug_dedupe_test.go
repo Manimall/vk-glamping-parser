@@ -66,7 +66,7 @@ func TestDedupeSlugs_GeneratedNeverTramplesRealName(t *testing.T) {
 	if got[99] != "dom-2" {
 		t.Fatalf("настоящий «Дом 2» растоптан: %v", got)
 	}
-	if got[2] == "dom-2" || got[2] == got[99] || got[7] != "dom-7" {
+	if got[2] != "dom-2-2" || got[7] != "dom-7" {
 		t.Fatalf("коллизия сгенерированного с настоящим: %v", got)
 	}
 }

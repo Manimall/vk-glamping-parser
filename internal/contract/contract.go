@@ -34,7 +34,7 @@ type Object struct {
 	Slug string `json:"slug,omitempty"` // URL-идентификатор (/api/v1/glampings/<slug>)
 	// SourceID — id объекта у источника. Из слага id убран (issue #26), а связь
 	// с источником обязана жить: стыковка объектов между прогонами, фильтры
-	// «без новых», стабильная нумерация тёзок.
+	// «без новых»; слаги тёзок строятся из этого id.
 	SourceID int    `json:"sourceId,omitempty"`
 	Title    string `json:"title,omitempty"` // название объекта
 	About    string `json:"about,omitempty"` // описание

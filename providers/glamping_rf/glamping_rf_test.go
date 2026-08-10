@@ -60,6 +60,13 @@ func TestParse_DedupAcrossPlaces(t *testing.T) {
 	if len(out) != 3 { // {1,2,3}
 		t.Fatalf("ожидал 3 уникальных, получил %d", len(out))
 	}
+	// Запирает вызов dedupeSlugs внутри Parse: фикстурные объекты — тёзки «obj».
+	want := map[string]bool{"obj-1": true, "obj-2": true, "obj-3": true}
+	for _, o := range out {
+		if !want[o.Slug] {
+			t.Fatalf("тёзка без id-суффикса после Parse: %q", o.Slug)
+		}
+	}
 }
 
 func TestParse_PaginatesUntilNoMore(t *testing.T) {

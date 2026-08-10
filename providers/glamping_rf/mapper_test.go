@@ -107,6 +107,13 @@ func TestToObject_HubCityIsNotLocality(t *testing.T) {
 	}
 }
 
+// Пустое имя источника не должно рождать объект без URL.
+func TestToObject_EmptyTitleFallbackSlug(t *testing.T) {
+	if got := toObject(apiItem{ID: 5}).Slug; got != "glamping-5" {
+		t.Fatalf("slug=%q, ожидал glamping-5", got)
+	}
+}
+
 func TestCollectPhotos_FallbackToThumb(t *testing.T) {
 	it := apiItem{ThumbMain: apiThumb{SrcWebp: "https://s/cover.webp"}} // images пусты
 	got := collectPhotos(it)

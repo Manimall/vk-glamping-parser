@@ -31,9 +31,13 @@ type Cabin struct {
 // галерея) + список домиков. Единый JSON-контракт для фронта. omitempty убирает
 // поля, которых нет.
 type Object struct {
-	Slug  string `json:"slug,omitempty"`  // URL-идентификатор (/api/v1/glampings/<slug>)
-	Title string `json:"title,omitempty"` // название объекта
-	About string `json:"about,omitempty"` // описание
+	Slug string `json:"slug,omitempty"` // URL-идентификатор (/api/v1/glampings/<slug>)
+	// SourceID — id объекта у источника. Из слага id убран (issue #26), а связь
+	// с источником обязана жить: стыковка объектов между прогонами, фильтры
+	// «без новых»; слаги тёзок строятся из этого id.
+	SourceID int    `json:"sourceId,omitempty"`
+	Title    string `json:"title,omitempty"` // название объекта
+	About    string `json:"about,omitempty"` // описание
 
 	// Location — человекочитаемая строка ДЛЯ ПОКАЗА. Разбирать её обратно на
 	// составляющие нельзя: для этого есть Region/Locality/NearCity ниже.

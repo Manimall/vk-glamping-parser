@@ -84,12 +84,12 @@ func (p *Provider) Parse(ctx context.Context) ([]contract.Object, error) {
 			p.collectPlace(ctx, dir.name, place, seen, &items)
 			if ctx.Err() != nil {
 				// Отмена во время сбора: обогащать поздно — отдаём как есть.
-				return rawObjects(items), ctx.Err()
+				return dedupeSlugs(rawObjects(items)), ctx.Err()
 			}
 		}
 	}
 
-	kept := p.enrichAll(ctx, items)
+	kept := dedupeSlugs(p.enrichAll(ctx, items))
 	slog.Info("glamping_rf: сбор завершён",
 		"unique", len(kept), "снято_с_каталога", len(items)-len(kept))
 	return kept, ctx.Err()

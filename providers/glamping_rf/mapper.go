@@ -25,10 +25,17 @@ func toObject(it apiItem) contract.Object {
 	location := buildLocation(region, nearCity)
 	photos := collectPhotos(it)
 
+	// Слаг — чистый транслит имени, без id (issue #26); тёзки получают суффикс
+	// -<sourceId> постобработкой dedupeSlugs. Пустое/нетранслитерируемое имя —
+	// fallback: объект без URL существовать не может.
+	objSlug := slug.Make(title)
+	if objSlug == "" {
+		objSlug = fmt.Sprintf("glamping-%d", it.ID)
+	}
+
 	obj := contract.Object{
-		// Слаг: транслит имени + id источника — уникален даже при одинаковых
-		// названиях («Деревня Ильино» id=959 → "derevnya-ilino-959").
-		Slug:     slug.Make(fmt.Sprintf("%s %d", title, it.ID)),
+		Slug:     objSlug,
+		SourceID: it.ID,
 		Title:    title,
 		Location: location,
 		Region:   region,

@@ -34,8 +34,11 @@ func TestToObject_Mapping(t *testing.T) {
 		t.Fatalf("title=%q, ожидал name_new", o.Title)
 	}
 	// Запирает композицию слага и no-op декода на чистых названиях.
-	if o.Slug != "derevnya-ilino-959" {
-		t.Fatalf("slug=%q, ожидал derevnya-ilino-959", o.Slug)
+	if o.Slug != "derevnya-ilino" {
+		t.Fatalf("slug=%q, ожидал derevnya-ilino (без id, issue #26)", o.Slug)
+	}
+	if o.SourceID != 959 {
+		t.Fatalf("sourceId=%d, ожидал 959 — id переехал из слага в данные", o.SourceID)
 	}
 	if o.Location != "Тульская область" {
 		t.Fatalf("location=%q", o.Location)
@@ -101,6 +104,13 @@ func TestToObject_HubCityIsNotLocality(t *testing.T) {
 	// бота по названию города.
 	if o.Location != "Ярославская область, Москва" {
 		t.Fatalf("location=%q — формат строки показа изменился", o.Location)
+	}
+}
+
+// Пустое имя источника не должно рождать объект без URL.
+func TestToObject_EmptyTitleFallbackSlug(t *testing.T) {
+	if got := toObject(apiItem{ID: 5}).Slug; got != "glamping-5" {
+		t.Fatalf("slug=%q, ожидал glamping-5", got)
 	}
 }
 

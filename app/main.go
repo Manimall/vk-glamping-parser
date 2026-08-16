@@ -56,7 +56,8 @@ func main() {
 	// (CLI-режим экспорта), иначе поднимаем HTTP-сервер.
 	exportDomain := flag.String("export", "", "домен объекта: собрать photo-N.webp и выйти (вместо сервера)")
 	exportOut := flag.String("out", "", "каталог вывода (-export фото / --provider JSON)")
-	providerName := flag.String("provider", "", "пакетный сбор источника: glamping → generated/<name>/objects.json")
+	providerName := flag.String("provider", "", "пакетный сбор источника: glamping | avito → generated/<name>/objects.json")
+	inputDir := flag.String("input", "", "каталог с сохранёнными страницами (--provider=avito)")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -68,7 +69,7 @@ func main() {
 	// Режим провайдера: пакетный сбор источника в generated/ и выход. VK-токен
 	// здесь не требуется (провайдер glamping ходит на свой сайт).
 	if *providerName != "" {
-		if err := runProvider(cfg, *providerName, *exportOut); err != nil {
+		if err := runProvider(cfg, *providerName, *exportOut, *inputDir); err != nil {
 			slog.Error("provider failed", "err", err)
 			os.Exit(1)
 		}

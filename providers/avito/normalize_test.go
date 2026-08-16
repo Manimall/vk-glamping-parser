@@ -1,0 +1,46 @@
+package avito
+
+import "testing"
+
+func TestNormalizeHomoglyphs(t *testing.T) {
+	// Строки взяты из реальных объявлений: продавцы подменяют буквы, чтобы
+	// обходить автофильтры Авито.
+	cases := []struct{ name, in, want string }{
+		{"подмена внутри слова", "Cаунa внутpи", "Сауна внутри"},
+		{"заглавные", "MЫ coздали этo меcтo", "МЫ создали это место"},
+		{"смешанное слово", "прocтранство", "пространство"},
+		{"чистая кириллица не меняется", "Отдых для двоих", "Отдых для двоих"},
+
+		// Главная страховка: латинские слова обязаны выжить целыми. Слепая
+		// замена по таблице сломала бы «A-frame» — термин, вокруг которого
+		// построен весь каталог.
+		{"A-frame не трогаем", "Домик A-frame у озера", "Домик A-frame у озера"},
+		{"латинские слова целиком", "SPA, WhatsApp, Cottage", "SPA, WhatsApp, Cottage"},
+		{"дефис разрывает слово", "эко-Cottage", "эко-Cottage"},
+
+		{"пустая строка", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := NormalizeHomoglyphs(c.in); got != c.want {
+				t.Errorf("NormalizeHomoglyphs(%q) = %q, ожидалось %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCollapseSpaces(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"неразрывный пробел", "1 ч", "1 ч"},
+		{"перевод строки", "первая\nвторая", "первая вторая"},
+		{"двойные пробелы и края", "  8 000   ₽  ", "8 000 ₽"},
+		{"пустая строка", "   ", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := CollapseSpaces(c.in); got != c.want {
+				t.Errorf("CollapseSpaces(%q) = %q, ожидалось %q", c.in, got, c.want)
+			}
+		})
+	}
+}

@@ -93,6 +93,29 @@ func TestSkipsBrokenAndDuplicates(t *testing.T) {
 	}
 }
 
+// Тёзки из РАЗНЫХ источников — известное ограничение склейки, и оно
+// асимметрично: провайдеры читаются по алфавиту, поэтому «avito» вытесняет
+// объект «glamping_rf», а не наоборот. Внутри одного провайдера такого не
+// бывает — там тёзок разводит providers.DedupeSlugs.
+//
+// Тест фиксирует поведение, а не одобряет его: разводить слаги на чтении
+// нельзя (адрес объекта уже опубликован), чинится это при генерации данных.
+// Пока не починено — единственный сигнал об исчезнувшем объекте — строка
+// ERROR в логе.
+func TestCrossProviderNamesakeIsLostAlphabetically(t *testing.T) {
+	dir := t.TempDir()
+	writeProvider(t, dir, "avito", []contract.Object{obj("dom-u-ozera", "С Авито", "1 ₽")})
+	writeProvider(t, dir, "glamping_rf", []contract.Object{obj("dom-u-ozera", "С глэмпинги.рф", "2 ₽")})
+
+	list := New(dir).List()
+	if len(list) != 1 {
+		t.Fatalf("ожидал 1 объект (второй тёзка теряется), получил %d: %+v", len(list), list)
+	}
+	if list[0].Title != "С Авито" {
+		t.Errorf("выжил %q — порядок склейки изменился, проверьте, чей URL теперь занят", list[0].Title)
+	}
+}
+
 func TestEmptyDirIsNotFatal(t *testing.T) {
 	r := New(filepath.Join(t.TempDir(), "нет-такого"))
 	if got := r.List(); len(got) != 0 {

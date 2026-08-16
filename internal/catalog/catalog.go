@@ -96,6 +96,10 @@ func (r *Repository) reload() error {
 	bySlug := make(map[string]contract.Object)
 	order := make([]string, 0)
 
+	// Откуда пришёл слаг — нужно в сообщении о коллизии: без имени первого
+	// файла видно только жертву, а разбираться надо с парой.
+	fileOf := make(map[string]string)
+
 	for _, f := range files {
 		objs, err := readObjects(f)
 		if err != nil {
@@ -107,11 +111,19 @@ func (r *Repository) reload() error {
 				slog.Warn("catalog: объект без slug пропущен", "file", f, "title", o.Title)
 				continue
 			}
+			// Тёзки ИЗ РАЗНЫХ источников — единственный случай, когда объект
+			// пропадает из выдачи целиком: внутри одного провайдера их
+			// разводит providers.DedupeSlugs, а здесь разводить нельзя (слаг
+			// уже опубликован, менять его на чтении значит менять чужой URL).
+			// Уровень ERROR, а не WARN: объект исчезает с сайта молча, и
+			// заметить это можно только по этой строке.
 			if _, dup := bySlug[o.Slug]; dup {
-				slog.Warn("catalog: дубль slug пропущен", "slug", o.Slug, "file", f)
+				slog.Error("catalog: тёзки из разных источников, объект пропущен",
+					"slug", o.Slug, "пропущен", f, "занят", fileOf[o.Slug], "title", o.Title)
 				continue
 			}
 			bySlug[o.Slug] = o
+			fileOf[o.Slug] = f
 			order = append(order, o.Slug)
 		}
 	}

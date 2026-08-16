@@ -163,3 +163,22 @@ func TestAboutTextFallsBackToPlainDescription(t *testing.T) {
 		t.Errorf("aboutText = %q", got)
 	}
 }
+
+// Пустые абзацы и двойные <br> — обычная разметка объявления, и каждый такой
+// тег оставляет по разделителю. В трёх сохранённых страницах их не оказалось
+// случайно; уехали бы они и в About, и в OG-описание ссылки.
+func TestAboutTextDropsSeparatorRuns(t *testing.T) {
+	cases := []struct{ name, html, want string }{
+		{"пустой абзац в конце", "<p>Текст</p><p><br></p>", "Текст"},
+		{"два пустых абзаца", "<p>Текст</p><p></p><p></p>", "Текст"},
+		{"разделители с обеих сторон", "<div><br/><br/>Текст<br/><br/></div>", "Текст"},
+		{"пустой абзац в середине", "<p>Баня</p><p></p><p>Купель</p>", "Баня · Купель"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := aboutText(avitoItem{DescriptionHtml: c.html}); got != c.want {
+				t.Errorf("aboutText = %q, ожидалось %q", got, c.want)
+			}
+		})
+	}
+}

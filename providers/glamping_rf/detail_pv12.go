@@ -79,7 +79,7 @@ func priceFromDesc(desc, serviceName string) string {
 	// Несколько вариантов ИМЕННО этой услуги — показываем нижнюю границу:
 	// первое совпадение может оказаться баней на 20 человек.
 	if prices := priceVariants(desc, serviceName); prices != nil {
-		return "от " + formatRub(lowestPrice(prices))
+		return "от " + extract.FormatPrice(lowestPrice(prices))
 	}
 	if loc := priceRe.FindStringSubmatchIndex(desc); loc != nil {
 		n := parseDigits(desc[loc[2]:loc[3]])
@@ -88,26 +88,26 @@ func priceFromDesc(desc, serviceName string) string {
 		}
 		tail := desc[loc[1]:min(len(desc), loc[1]+hourlyTailWindow)]
 		if hourlyRe.MatchString(tail) {
-			return formatRub(n) + "/час"
+			return extract.FormatPrice(n) + "/час"
 		}
-		return formatRub(n)
+		return extract.FormatPrice(n)
 	}
 	if m := perHourRe.FindStringSubmatch(desc); m != nil {
 		if n := parseDigits(m[1]); n > 0 {
 			if m[2] != "" {
-				return formatRub(n) + " за " + m[2] + " ч" // сеанс: «15 000 ₽ за 3 ч»
+				return extract.FormatPrice(n) + " за " + m[2] + " ч" // сеанс: «15 000 ₽ за 3 ч»
 			}
-			return formatRub(n) + "/час"
+			return extract.FormatPrice(n) + "/час"
 		}
 	}
 	if m := costWordRe.FindStringSubmatch(desc); m != nil {
 		if n := parseDigits(m[1]); n > 0 {
-			return formatRub(n)
+			return extract.FormatPrice(n)
 		}
 	}
 	if m := bareNumberRe.FindStringSubmatch(desc); m != nil {
 		if n := parseDigits(m[1]); n > 0 {
-			return formatRub(n)
+			return extract.FormatPrice(n)
 		}
 	}
 	return ""
@@ -120,20 +120,6 @@ func parseDigits(s string) int {
 		return 0
 	}
 	return n
-}
-
-// formatRub — цена в стиле сайта: «5 000 ₽» (пробел-разделитель тысяч).
-func formatRub(n int) string {
-	s := strconv.Itoa(n)
-	var b strings.Builder
-	for i, c := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			b.WriteByte(' ')
-		}
-		b.WriteRune(c)
-	}
-	b.WriteString(" ₽")
-	return b.String()
 }
 
 // balancedJSON вырезает первый сбалансированный литерал (объект/массив) после

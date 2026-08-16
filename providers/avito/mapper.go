@@ -13,10 +13,6 @@ import (
 
 // Перекладывание объявления Авито в единый контракт каталога.
 
-// photoSize — размер фото, который забираем в галерею. Максимум, который отдаёт
-// состояние страницы; меньшие (640×480, 150×110, 75×55) — превью выдачи.
-const photoSize = "1280x960"
-
 // blockTagRe — теги, на месте которых в тексте должен остаться разделитель.
 // Без этого «</p><p>» склеивает последнее слово абзаца с первым словом
 // следующего: «…перезагрузкиМы создали это место…».
@@ -24,6 +20,10 @@ var blockTagRe = regexp.MustCompile(`(?i)<(br|/p|/li|/div|/h[1-6])\b[^>]*>`)
 
 // tagRe — любой оставшийся тег.
 var tagRe = regexp.MustCompile(`<[^>]*>`)
+
+// repeatedSeparatorRe — цепочка разделителей подряд: её оставляют пустые абзацы
+// и двойные переводы строки, из каждого тега получается по «·».
+var repeatedSeparatorRe = regexp.MustCompile(`(?:\s*·\s*){2,}`)
 
 // reviewsCountRe — число отзывов из публичной строки рейтинга.
 //
@@ -66,7 +66,7 @@ func toObject(bi *buyerItem) contract.Object {
 		PriceValue: it.Price,
 		Photos:     photos(it),
 		Cover:      cover(it),
-		Cabins:     []contract.Cabin{},
+		Cabins:     cabins(title, address, it.Price),
 		Extras:     extras(it.PriceList),
 	}
 
@@ -124,73 +124,14 @@ func aboutText(it avitoItem) string {
 	return trimSeparators(CollapseSpaces(NormalizeHomoglyphs(plain)))
 }
 
-// trimSeparators убирает разделители, оставшиеся по краям после замены тегов:
-// описание почти всегда заканчивается закрывающим тегом.
+// trimSeparators убирает разделители, оставшиеся после замены тегов.
+//
+// Схлопывание повторов обязательно, а не для красоты: пустой абзац и двойной
+// <br> — обычное дело в объявлениях, и каждый такой тег оставляет по «·».
+// Обрезать края поодиночке недостаточно — между разделителями стоят пробелы,
+// поэтому cutset берёт и то, и другое.
 func trimSeparators(s string) string {
-	return strings.TrimSpace(strings.Trim(strings.TrimSpace(s), "·"))
-}
-
-// photo — фото объявления: id из Images и ссылки из ImageUrls, сведённые в одну
-// сущность. Порознь их держать нельзя — именно рассинхрон этих двух списков
-// ломал выбор обложки (см. cover).
-type photo struct {
-	id  int64
-	url string
-}
-
-// gallery сводит параллельные списки Авито в пары id↔ссылка.
-//
-// Списки идут бок о бок и по замыслу площадки совпадают по длине, но полагаться
-// на это нельзя: у свежезалитого кадра CDN может ещё не отдать крупный размер,
-// и такой элемент из галереи выпадает. Поэтому идём по индексу и берём id
-// только там, где он реально есть.
-func gallery(it avitoItem) []photo {
-	out := make([]photo, 0, len(it.ImageUrls))
-	for i, sizes := range it.ImageUrls {
-		url := sizes[photoSize]
-		if url == "" {
-			continue
-		}
-		p := photo{url: url}
-		if i < len(it.Images) {
-			p.id = it.Images[i]
-		}
-		out = append(out, p)
-	}
-	return out
-}
-
-// photos — ссылки на полноразмерные фото в порядке объявления.
-//
-// Ссылки ведут на CDN Авито (*.img.avito.st) и НЕ скачиваются здесь: провайдер
-// вообще не ходит в сеть. Скачивание — отдельный шаг с отдельным решением, и
-// принимать его должен владелец, а не разбор сохранённого файла.
-func photos(it avitoItem) []string {
-	g := gallery(it)
-	out := make([]string, 0, len(g))
-	for _, p := range g {
-		out = append(out, p.url)
-	}
-	return out
-}
-
-// cover — обложка объявления, отмеченная у Авито в listingImage.
-//
-// Ищем по id, а не по позиции: позиция берётся из полного списка Images, а
-// галерея может быть короче (см. gallery), и тогда индекс уезжает на соседний
-// кадр — обложкой станет не то фото, что видно в выдаче Авито. Если id не
-// нашёлся, берём первое фото: пустая обложка в каталоге заметнее, чем не та.
-func cover(it avitoItem) string {
-	g := gallery(it)
-	if len(g) == 0 {
-		return ""
-	}
-	for _, p := range g {
-		if p.id == it.ListingImage {
-			return p.url
-		}
-	}
-	return g[0].url
+	return strings.Trim(repeatedSeparatorRe.ReplaceAllString(s, " · "), " ·")
 }
 
 // extras — платные допы из прайс-листа объявления («Фурако — 5 000 ₽»,

@@ -46,26 +46,30 @@ func TestParseRealPages(t *testing.T) {
 	// make_fixture.py — второй, независимый список полей. Забудь его дополнить —
 	// поле молча придёт нулевым, а тесты остались бы зелёными.
 	t.Run("все читаемые поля есть в данных", func(t *testing.T) {
+		// Проверки идут списком, а не через switch: switch останавливается на
+		// первой сработавшей ветке, и об остальных пустых полях объекта отчёта
+		// бы не было — пришлось бы чинить их по одному за прогон.
 		for _, o := range objects {
-			switch {
-			case o.Title == "", o.Slug == "", o.SourceID == 0:
-				t.Errorf("%d: пустое название/слаг/id", o.SourceID)
-			case o.PriceValue == 0:
-				t.Errorf("%d: нет цены", o.SourceID)
-			case o.Location == "", o.NearCity == "":
-				t.Errorf("%d: нет адреса или города", o.SourceID)
-			case o.Coords == nil:
-				t.Errorf("%d: нет координат", o.SourceID)
-			case len(o.Photos) == 0, o.Cover == "":
-				t.Errorf("%d: нет фото или обложки", o.SourceID)
-			case o.About == "":
-				t.Errorf("%d: нет описания", o.SourceID)
-			case len(o.Extras) == 0:
-				t.Errorf("%d: нет прайс-листа", o.SourceID)
-			case o.Rating == 0 || o.ReviewsCount == 0:
-				t.Errorf("%d: нет рейтинга", o.SourceID)
-			case o.Seo == nil || o.Seo.Title == "":
-				t.Errorf("%d: нет SEO-текстов", o.SourceID)
+			checks := []struct {
+				bad  bool
+				what string
+			}{
+				{o.Title == "" || o.Slug == "" || o.SourceID == 0, "название/слаг/id"},
+				{o.PriceValue == 0, "цена"},
+				{o.Location == "" || o.NearCity == "", "адрес или город"},
+				{o.Region == "", "регион"},
+				{o.Coords == nil, "координаты"},
+				{len(o.Photos) == 0 || o.Cover == "", "фото или обложка"},
+				{o.About == "", "описание"},
+				{len(o.Extras) == 0, "прайс-лист"},
+				{o.Rating == 0 || o.ReviewsCount == 0, "рейтинг"},
+				{o.Seo == nil || o.Seo.Title == "", "SEO-тексты"},
+				{len(o.Cabins) == 0 || o.Cabins[0].Price == "", "цена на плитке (Cabins[0].Price)"},
+			}
+			for _, c := range checks {
+				if c.bad {
+					t.Errorf("%d: пусто — %s", o.SourceID, c.what)
+				}
 			}
 		}
 	})

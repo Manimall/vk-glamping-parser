@@ -34,38 +34,6 @@ var repeatedSeparatorRe = regexp.MustCompile(`(?:\s*·\s*){2,}`)
 // («1 234 отзыва»), поэтому цифры могут идти группами.
 var reviewsCountRe = regexp.MustCompile(`(\d[\d \x{00a0}]*)\s*отзыв`)
 
-// regionSuffixes — окончания первого сегмента адреса, по которым видно, что это
-// именно регион, а не сразу город. Адрес Авито — структурное поле источника, но
-// первый сегмент у него бывает и «Ивановская обл.», и «Москва».
-//
-// Форм «Карельская респ.» здесь нет намеренно: республику Авито пишет
-// префиксом, а признай мы такую строку регионом — развернуть её словарь бы не
-// смог, и в каталог уехала бы вторая ось рядом с «Республика Карелия».
-var regionSuffixes = []string{" обл.", " обл", " область", " край", " ао", " аобл"}
-
-// regionSuffixExpansions — словарь сокращений Авито: «Ивановская обл.» и
-// «Ивановская область» — одно и то же, и в каталог обязана уехать вторая форма.
-//
-// Region — ось группировки: каталог, фильтры и мастер подбора бота сводят
-// объекты по СОВПАДЕНИЮ строки, а нормализация на сайте (resolveRegion) поле
-// источника не трогает — доверяет ему. Отдай мы сокращение при том, что у
-// остальных 319 объектов форма полная, — в фильтре появился бы регион-двойник,
-// и объекты Авито прятались бы в нём: проверено сквозным прогоном синхронизации
-// каталога, было 11 регионов вместо 10.
-var regionSuffixExpansions = []struct{ short, full string }{
-	{" обл.", " область"},
-	{" обл", " область"},
-	{" ао", " автономный округ"},
-	{" аобл", " автономная область"},
-}
-
-// regionPrefixExpansions — сокращения, которые Авито ставит ПЕРЕД названием:
-// республики пишутся «Респ. Карелия», а не «Карельская респ.».
-var regionPrefixExpansions = []struct{ short, full string }{
-	{"респ. ", "Республика "},
-	{"респ ", "Республика "},
-}
-
 // toObject собирает карточку каталога из объявления.
 //
 // Чего здесь СОЗНАТЕЛЬНО нет: Surroundings, HouseTypes и PetsAllowed. Оба
@@ -112,60 +80,6 @@ func toObject(bi *buyerItem) contract.Object {
 	obj.Seo = &seo
 
 	return obj
-}
-
-// region — регион из первого сегмента адреса источника.
-//
-// Это НЕ обратный разбор contract.Location (он запрещён): читаем структурное
-// поле address самого Авито, у которого регион всегда идёт первым. Проверяем
-// форму записи, потому что у городов федерального значения первый сегмент —
-// сразу город («Москва, ул. …»), и подставлять его как регион нельзя: Region в
-// каталоге — ось группировки, и город в ней сломает фильтр.
-func region(address string) string {
-	first, _, found := strings.Cut(address, ",")
-	if !found {
-		return ""
-	}
-	first = strings.TrimSpace(first)
-	lower := strings.ToLower(first)
-	if !looksLikeRegion(lower) {
-		return ""
-	}
-	return expandRegion(first, lower)
-}
-
-// looksLikeRegion — первый сегмент назван регионом, а не городом: у области и
-// края тип идёт в конце, у республики и округа бывает и в начале.
-func looksLikeRegion(lower string) bool {
-	for _, suffix := range regionSuffixes {
-		if strings.HasSuffix(lower, suffix) {
-			return true
-		}
-	}
-	for _, e := range regionPrefixExpansions {
-		if strings.HasPrefix(lower, e.short) {
-			return true
-		}
-	}
-	return false
-}
-
-// expandRegion разворачивает сокращение источника в полную форму каталога.
-//
-// Порядок перебора — от длинного к короткому, иначе « обл» съело бы хвост у
-// « обл.» и в каталог уехала бы «Ивановская область.» с точкой на конце.
-func expandRegion(region, lower string) string {
-	for _, e := range regionPrefixExpansions {
-		if strings.HasPrefix(lower, e.short) {
-			return e.full + region[len(e.short):]
-		}
-	}
-	for _, e := range regionSuffixExpansions {
-		if strings.HasSuffix(lower, e.short) {
-			return region[:len(region)-len(e.short)] + e.full
-		}
-	}
-	return region
 }
 
 // aboutText — описание в виде плоского текста: HTML убран, сущности раскрыты,

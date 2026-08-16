@@ -48,7 +48,7 @@ func TestCabinsEmptyWithoutPrice(t *testing.T) {
 // Формат цены обязан совпадать с тем, что уже лежит в каталоге от glamping_rf:
 // одно и то же число иначе печаталось бы на соседних карточках по-разному.
 func TestCabinPriceMatchesCatalogFormat(t *testing.T) {
-	got := cabins("Дом", "Иваново", 7650)[0].Price
+	got := cabins("Дом", "Иваново", "описание", 7650)[0].Price
 	want := contract.Cabin{Price: "7 650 ₽"}.Price
 	if got != want {
 		t.Errorf("цена %q, в каталоге формат %q", got, want)

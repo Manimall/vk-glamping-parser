@@ -2,6 +2,7 @@ package avito
 
 import (
 	"html"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -50,7 +51,10 @@ func toObject(bi *buyerItem) contract.Object {
 	// Сокращение региона разворачивается и в адресе показа: Region и Location
 	// обязаны начинаться одинаково, иначе плитка каталога перестаёт сокращать
 	// строку места и печатает адрес целиком (см. canonAddress).
-	address := canonAddress(CollapseSpaces(it.Address))
+	// Адрес чистится от подменённых букв наравне с заголовком: латинская «a» в
+	// «Ивaновская обл.» дала бы регион-двойник — ровно то, от чего защищает
+	// словарь ниже.
+	address := publicAddress(canonAddress(CollapseSpaces(NormalizeHomoglyphs(it.Address))))
 	about := aboutText(it)
 
 	obj := contract.Object{
@@ -59,7 +63,7 @@ func toObject(bi *buyerItem) contract.Object {
 		Title:      title,
 		About:      about,
 		Location:   address,
-		Region:     region(address),
+		Region:     objectRegion(it.ID, address),
 		NearCity:   CollapseSpaces(it.Location.Name),
 		PriceValue: it.Price,
 		Photos:     photos(it),
@@ -83,6 +87,22 @@ func toObject(bi *buyerItem) contract.Object {
 	obj.Seo = &seo
 
 	return obj
+}
+
+// objectRegion — регион объекта с жалобой в лог, если форма записи незнакома.
+//
+// Молчать тут нельзя: пустой регион синк не пропускает — он подставляет догадку
+// по адресу, и в ось группировки уезжает либо чужой субъект, либо строка
+// целиком. Ни то ни другое проверкой «регионов не стало больше» не ловится.
+// В лог идёт только первый сегмент: остальное — адрес человека.
+func objectRegion(sourceID int, address string) string {
+	r := region(address)
+	if r == "" {
+		first, _, _ := strings.Cut(address, ",")
+		slog.Warn("avito: регион не распознан, каталог подставит догадку по адресу",
+			"sourceId", sourceID, "первыйСегмент", strings.TrimSpace(first))
+	}
+	return r
 }
 
 // aboutText — описание в виде плоского текста: HTML убран, сущности раскрыты,

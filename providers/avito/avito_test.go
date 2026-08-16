@@ -104,13 +104,26 @@ func TestParseRealPages(t *testing.T) {
 		}
 	})
 
-	t.Run("адрес для показа и опорный город", func(t *testing.T) {
+	// Адрес показа — регион и населённый пункт, без улицы и дома. Точный адрес
+	// Авито отдаёт, но публиковать его нельзя: владелец согласия не давал, а
+	// строка уезжает в <title> страницы, то есть в поисковый индекс.
+	t.Run("адрес показа без улицы и номера дома", func(t *testing.T) {
 		o := objects[byID[idFurako]]
-		if !strings.Contains(o.Location, "Садовая ул., 32") {
-			t.Errorf("Location = %q, ожидался адрес с домом", o.Location)
+		if o.Location != "Ивановская область, д. Коляново" {
+			t.Errorf("Location = %q", o.Location)
 		}
 		if o.NearCity != "Иваново" {
 			t.Errorf("NearCity = %q", o.NearCity)
+		}
+		for _, obj := range objects {
+			for _, leak := range []string{"ул.", "улица", "пр-т", "наб.", "32"} {
+				if strings.Contains(obj.Location, leak) {
+					t.Errorf("%d: в адресе осталось %q — %q", obj.SourceID, leak, obj.Location)
+				}
+				if obj.Seo != nil && strings.Contains(obj.Seo.Title, leak) {
+					t.Errorf("%d: в SEO-заголовке осталось %q — %q", obj.SourceID, leak, obj.Seo.Title)
+				}
+			}
 		}
 	})
 

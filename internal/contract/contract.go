@@ -7,7 +7,9 @@
 // на main. app держит на них псевдонимы (type GlampingData = contract.Object).
 package contract
 
-import "vk-parser/internal/extract"
+import (
+	"vk-parser/internal/extract"
+)
 
 // Coords — гео-координаты объекта. Указатель у владельца, чтобы omitempty мог их
 // «выкинуть»: у структуры-значения нет понятия «пустая», а nil-указатель уберётся.

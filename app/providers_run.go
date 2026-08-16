@@ -19,6 +19,7 @@ import (
 	"vk-parser/internal/geocode"
 	"vk-parser/internal/vk"
 	"vk-parser/providers"
+	"vk-parser/providers/avito"
 	"vk-parser/providers/glamping_rf"
 	vkprovider "vk-parser/providers/vk"
 )
@@ -35,10 +36,17 @@ const providerTimeout = 30 * time.Minute
 // а один case принимает несколько значений через запятую. Возвращаем ИНТЕРФЕЙС
 // providers.Provider — вызывающему всё равно, какой конкретный тип внутри
 // (полиморфизм без наследования).
-func selectProvider(name string, cfg *config.Config) (providers.Provider, error) {
+func selectProvider(name string, cfg *config.Config, inputDir string) (providers.Provider, error) {
 	switch name {
 	case "glamping", "glamping_rf":
 		return glamping_rf.New(), nil
+	case "avito":
+		// Fail-fast, как у vk с токеном: без каталога страниц провайдер собрал бы
+		// пустой objects.json и «успешно» затёр им прошлый сбор.
+		if inputDir == "" {
+			return nil, fmt.Errorf("провайдер avito требует --input=<каталог с сохранёнными страницами>")
+		}
+		return avito.New(inputDir), nil
 	case "vk":
 		// Fail-fast: без токена каждый домен молча упал бы per-domain (graceful
 		// WARN) и вышел бы «успешный» пустой objects.json — маскировка мисконфига.
@@ -47,7 +55,7 @@ func selectProvider(name string, cfg *config.Config) (providers.Provider, error)
 		}
 		return vkprovider.New(vk.NewClient(cfg.VKToken), chooseExtractor(cfg), geocode.New(), cfg.DataDir), nil
 	default:
-		return nil, fmt.Errorf("неизвестный провайдер %q (доступно: vk, glamping)", name)
+		return nil, fmt.Errorf("неизвестный провайдер %q (доступно: vk, glamping, avito)", name)
 	}
 }
 
@@ -64,8 +72,8 @@ func chooseExtractor(cfg *config.Config) extract.Extractor {
 
 // runProvider запускает сбор выбранным провайдером и пишет результат в
 // generated/<provider>/objects.json (или в outDir, если задан -out).
-func runProvider(cfg *config.Config, name, outDir string) error {
-	p, err := selectProvider(name, cfg)
+func runProvider(cfg *config.Config, name, outDir, inputDir string) error {
+	p, err := selectProvider(name, cfg, inputDir)
 	if err != nil {
 		return err
 	}

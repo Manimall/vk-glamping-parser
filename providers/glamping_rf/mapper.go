@@ -26,7 +26,7 @@ func toObject(it apiItem) contract.Object {
 	photos := collectPhotos(it)
 
 	// Слаг — чистый транслит имени, без id (issue #26); тёзки получают суффикс
-	// -<sourceId> постобработкой dedupeSlugs. Пустое/нетранслитерируемое имя —
+	// -<sourceId> постобработкой providers.DedupeSlugs. Пустое/нетранслитерируемое имя —
 	// fallback: объект без URL существовать не может.
 	objSlug := slug.Make(title)
 	if objSlug == "" {

@@ -47,7 +47,10 @@ var reviewsCountRe = regexp.MustCompile(`(\d[\d \x{00a0}]*)\s*отзыв`)
 func toObject(bi *buyerItem) contract.Object {
 	it := bi.Item
 	title := CollapseSpaces(NormalizeHomoglyphs(it.Title))
-	address := CollapseSpaces(it.Address)
+	// Сокращение региона разворачивается и в адресе показа: Region и Location
+	// обязаны начинаться одинаково, иначе плитка каталога перестаёт сокращать
+	// строку места и печатает адрес целиком (см. canonAddress).
+	address := canonAddress(CollapseSpaces(it.Address))
 	about := aboutText(it)
 
 	obj := contract.Object{

@@ -118,8 +118,15 @@ func (r *Repository) reload() error {
 			// Уровень ERROR, а не WARN: объект исчезает с сайта молча, и
 			// заметить это можно только по этой строке.
 			if _, dup := bySlug[o.Slug]; dup {
-				slog.Error("catalog: тёзки из разных источников, объект пропущен",
-					"slug", o.Slug, "пропущен", f, "занят", fileOf[o.Slug], "title", o.Title)
+				if occupied := fileOf[o.Slug]; occupied != f {
+					slog.Error("catalog: тёзки из разных источников, объект пропущен",
+						"slug", o.Slug, "пропущен", f, "занят", occupied, "title", o.Title)
+				} else {
+					// Дубль внутри одного файла — это сбой генерации у самого
+					// провайдера, и искать второй источник тут незачем.
+					slog.Error("catalog: дубль slug внутри источника, объект пропущен",
+						"slug", o.Slug, "file", f, "title", o.Title)
+				}
 				continue
 			}
 			bySlug[o.Slug] = o

@@ -21,11 +21,27 @@ var regionFullPrefixes = []string{"республика "}
 
 // regionSuffixExpansions — словарь сокращений Авито: «Ивановская обл.» и
 // «Ивановская область» — одно и то же, и в каталог обязана уехать вторая форма.
+//
+// «Республика» с заглавной не по прихоти: у республик с прилагательным
+// названием тип пишется вторым словом («Чувашская Республика»), и это часть
+// имени субъекта, а не пояснение к нему.
 var regionSuffixExpansions = []struct{ short, full string }{
 	{" обл.", " область"},
 	{" обл", " область"},
+	{" респ.", " Республика"},
+	{" респ", " Республика"},
 	{" ао", " автономный округ"},
 	{" аобл", " автономная область"},
+}
+
+// regionExceptions — субъекты, у которых общее правило даёт неверную форму.
+//
+// Единственная в стране автономная ОБЛАСТЬ сокращается и как «Аобл», и как
+// «АО», а «АО» в остальных двенадцати случаях — округ. Общее правило выдало бы
+// «Еврейская автономный округ»: безграмотный ярлык в оси группировки, да ещё и
+// двойник к «Еврейской автономной области» при первом же объекте с «Аобл».
+var regionExceptions = map[string]string{
+	"еврейская ао": "Еврейская автономная область",
 }
 
 // regionPrefixExpansions — сокращения, которые Авито ставит ПЕРЕД названием:
@@ -42,17 +58,40 @@ var regionPrefixExpansions = []struct{ short, full string }{
 // форму записи, потому что у городов федерального значения первый сегмент —
 // сразу город («Москва, ул. …»), и подставлять его как регион нельзя: город в
 // оси группировки сломает фильтр.
+// Запятая не обязательна: у сервисных объявлений адрес бывает и одним
+// сегментом («Ивановская обл.»), а форму записи проверяет looksLikeRegion — ей
+// всё равно, есть ли продолжение.
 func region(address string) string {
-	first, _, found := strings.Cut(address, ",")
-	if !found {
-		return ""
-	}
+	first, _, _ := strings.Cut(address, ",")
 	first = strings.TrimSpace(first)
 	lower := strings.ToLower(first)
 	if !looksLikeRegion(lower) {
 		return ""
 	}
 	return expandRegion(first, lower)
+}
+
+// canonAddress — адрес источника, в котором сокращение региона развёрнуто так
+// же, как в поле Region.
+//
+// Без этого два поля одного объекта противоречат друг другу, и страдает от
+// этого плитка каталога: displayLocation на сайте сокращает строку места до
+// региона по совпадению префикса (`place.startsWith(area)`). «Ивановская обл.,
+// …» с «Ивановская область» не совпадает, и в плитку вместо названия региона
+// уезжает адрес целиком — до 93 символов с номером дома частного владельца
+// рядом с короткими строками остальных 320 объектов.
+func canonAddress(address string) string {
+	first, rest, found := strings.Cut(address, ",")
+	trimmed := strings.TrimSpace(first)
+	lower := strings.ToLower(trimmed)
+	if !looksLikeRegion(lower) {
+		return address
+	}
+	expanded := expandRegion(trimmed, lower)
+	if !found {
+		return expanded
+	}
+	return expanded + "," + rest
 }
 
 // looksLikeRegion — первый сегмент назван регионом, а не городом.
@@ -93,6 +132,9 @@ func looksLikeRegion(lower string) bool {
 // и нижнем регистре одинаковое число байт, поэтому lower совпадает с оригиналом
 // по длине.
 func expandRegion(region, lower string) string {
+	if full, ok := regionExceptions[lower]; ok {
+		return full
+	}
 	for _, e := range regionPrefixExpansions {
 		if strings.HasPrefix(lower, e.short) {
 			return e.full + region[len(e.short):]

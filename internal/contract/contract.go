@@ -7,7 +7,12 @@
 // на main. app держит на них псевдонимы (type GlampingData = contract.Object).
 package contract
 
-import "vk-parser/internal/extract"
+import (
+	"strconv"
+	"strings"
+
+	"vk-parser/internal/extract"
+)
 
 // Coords — гео-координаты объекта. Указатель у владельца, чтобы omitempty мог их
 // «выкинуть»: у структуры-значения нет понятия «пустая», а nil-указатель уберётся.
@@ -171,5 +176,26 @@ func (o Object) ToPreview() Preview {
 	if len(o.Cabins) > 0 {
 		p.Price = o.Cabins[0].Price
 	}
+	// Источник без разбивки по домикам (Авито: объявление — это объект целиком)
+	// оставил бы плитку каталога вовсе без цены, хотя PriceValue заполнен и
+	// фильтры по нему работают. Собираем строку из числа.
+	if p.Price == "" && o.PriceValue > 0 {
+		p.Price = FormatPrice(o.PriceValue)
+	}
 	return p
+}
+
+// FormatPrice — цена для показа: «6000» → «6 000 ₽». Разряды разделены
+// неразрывным пробелом, чтобы вёрстка не переносила строку между «6» и «000».
+func FormatPrice(value int) string {
+	digits := strconv.Itoa(value)
+	var b strings.Builder
+	for i, r := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteString(" ")
+		}
+		b.WriteRune(r)
+	}
+	b.WriteString(" ₽")
+	return b.String()
 }

@@ -20,9 +20,17 @@ import (
 // релизе площадки; JSON-состояние пережило три разные страницы, сохранённые в
 // разные дни, без единого расхождения в структуре.
 
-// hydrationMarker — начало блока состояния. Ищем именно присваивание, а не
-// просто "JSON.parse(": на странице есть и другие вызовы parse.
-const hydrationMarker = `window.__staticRouterHydrationData = JSON.parse(`
+// hydrationVar — имя переменной состояния. Ищем её, а не всю строку
+// присваивания целиком: пробелы вокруг «=» держатся на шаблоне Авито, и первая
+// версия кода искала точное `window.__staticRouterHydrationData = JSON.parse(`.
+// Стоило бы площадке минифицировать этот кусок — и прогон вернул бы «ни одна из
+// N страниц не разобрана» после того, как человек вручную сохранил десяток
+// страниц. Имя переменной публичное и меняется куда реже форматирования.
+const hydrationVar = "__staticRouterHydrationData"
+
+// parseCall — вызов, в который завёрнуто состояние. Ищется уже ПОСЛЕ имени
+// переменной, поэтому другие JSON.parse на странице не мешают.
+const parseCall = "JSON.parse("
 
 // itemRouteKey — ключ маршрута страницы объявления в loaderData. Назван так у
 // самого Авито (один компонент обслуживает каталог, главную и карточку).
@@ -78,11 +86,17 @@ func extractBuyerItem(html string) (*buyerItem, error) {
 // строку на первом же \" внутри текста, а жадный — захватил бы полстраницы.
 // Здесь мы идём по символам и считаем экранирование, как это делает парсер JS.
 func findJSONStringLiteral(html string) (string, error) {
-	at := strings.Index(html, hydrationMarker)
+	at := strings.Index(html, hydrationVar)
 	if at < 0 {
 		return "", errNoHydration
 	}
-	rest := html[at+len(hydrationMarker):]
+	rest := html[at+len(hydrationVar):]
+
+	call := strings.Index(rest, parseCall)
+	if call < 0 {
+		return "", errNoHydration
+	}
+	rest = rest[call+len(parseCall):]
 
 	open := strings.IndexByte(rest, '"')
 	if open < 0 {

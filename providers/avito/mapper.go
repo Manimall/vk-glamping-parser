@@ -17,7 +17,7 @@ import (
 // состояние страницы; меньшие (640×480, 150×110, 75×55) — превью выдачи.
 const photoSize = "1280x960"
 
-// blockTagRe — теги, на месте которых в тексте должен остаться разрыв.
+// blockTagRe — теги, на месте которых в тексте должен остаться разделитель.
 // Без этого «</p><p>» склеивает последнее слово абзаца с первым словом
 // следующего: «…перезагрузкиМы создали это место…».
 var blockTagRe = regexp.MustCompile(`(?i)<(br|/p|/li|/div|/h[1-6])\b[^>]*>`)
@@ -25,10 +25,19 @@ var blockTagRe = regexp.MustCompile(`(?i)<(br|/p|/li|/div|/h[1-6])\b[^>]*>`)
 // tagRe — любой оставшийся тег.
 var tagRe = regexp.MustCompile(`<[^>]*>`)
 
-// reviewsCountRe — число из публичной строки рейтинга («87 отзывов»).
-// Разряды у Авито разделены неразрывным пробелом, поэтому цифры могут идти
-// группами: «1 234 отзыва».
-var reviewsCountRe = regexp.MustCompile(`\d[\d \x{00a0}]*`)
+// reviewsCountRe — число отзывов из публичной строки рейтинга.
+//
+// Привязка к слову «отзыв» обязательна: без неё регулярка хватает ПЕРВОЕ число
+// строки, и стоит Авито начать отдавать «4,8 · 87 отзывов» — в каталог тихо
+// уедет 4 вместо 87. Это не падение, а незаметно неверная цифра, поэтому
+// страхуемся заранее. Разряды у Авито разделены неразрывным пробелом
+// («1 234 отзыва»), поэтому цифры могут идти группами.
+var reviewsCountRe = regexp.MustCompile(`(\d[\d \x{00a0}]*)\s*отзыв`)
+
+// regionSuffixes — окончания первого сегмента адреса, по которым видно, что это
+// именно регион, а не сразу город. Адрес Авито — структурное поле источника, но
+// первый сегмент у него бывает и «Ивановская обл.», и «Москва».
+var regionSuffixes = []string{" обл.", " область", " край", " респ.", " республика", " ао", " аобл"}
 
 // toObject собирает карточку каталога из объявления.
 //
@@ -43,13 +52,16 @@ var reviewsCountRe = regexp.MustCompile(`\d[\d \x{00a0}]*`)
 func toObject(bi *buyerItem) contract.Object {
 	it := bi.Item
 	title := CollapseSpaces(NormalizeHomoglyphs(it.Title))
+	address := CollapseSpaces(it.Address)
+	about := aboutText(it)
 
 	obj := contract.Object{
 		Slug:       slug.Make(title),
 		SourceID:   it.ID,
 		Title:      title,
-		About:      aboutText(it),
-		Location:   CollapseSpaces(it.Address),
+		About:      about,
+		Location:   address,
+		Region:     region(address),
 		NearCity:   CollapseSpaces(it.Location.Name),
 		PriceValue: it.Price,
 		Photos:     photos(it),
@@ -65,7 +77,36 @@ func toObject(bi *buyerItem) contract.Object {
 		obj.Rating = bi.Rating.ScoreFloat
 		obj.ReviewsCount = reviewsCount(bi.Rating)
 	}
+
+	// SEO/OG-тексты собираются той же функцией, что у остальных источников:
+	// без них ссылка на объект уезжает в мессенджер без описания, а именно
+	// ссылками владелец и будет делиться при обходе.
+	seo := extract.BuildSEO(extract.SEOInput{Name: title, Location: address, About: about})
+	obj.Seo = &seo
+
 	return obj
+}
+
+// region — регион из первого сегмента адреса источника.
+//
+// Это НЕ обратный разбор contract.Location (он запрещён): читаем структурное
+// поле address самого Авито, у которого регион всегда идёт первым. Проверяем
+// окончание, потому что у городов федерального значения первый сегмент — сразу
+// город («Москва, ул. …»), и подставлять его как регион нельзя: Region в
+// каталоге — ось группировки, и город в ней сломает фильтр.
+func region(address string) string {
+	first, _, found := strings.Cut(address, ",")
+	if !found {
+		return ""
+	}
+	first = strings.TrimSpace(first)
+	lower := strings.ToLower(first)
+	for _, suffix := range regionSuffixes {
+		if strings.HasSuffix(lower, suffix) {
+			return first
+		}
+	}
+	return ""
 }
 
 // aboutText — описание в виде плоского текста: HTML убран, сущности раскрыты,
@@ -76,9 +117,47 @@ func aboutText(it avitoItem) string {
 	if strings.TrimSpace(src) == "" {
 		src = it.Description
 	}
-	withBreaks := blockTagRe.ReplaceAllString(src, " ")
+	// Разделитель «·», а не пробел: пункты списка иначе сливаются в поток слов
+	// («Баня Купель Мангал»), и в SEO-описание уезжает каша.
+	withBreaks := blockTagRe.ReplaceAllString(src, " · ")
 	plain := html.UnescapeString(tagRe.ReplaceAllString(withBreaks, ""))
-	return CollapseSpaces(NormalizeHomoglyphs(plain))
+	return trimSeparators(CollapseSpaces(NormalizeHomoglyphs(plain)))
+}
+
+// trimSeparators убирает разделители, оставшиеся по краям после замены тегов:
+// описание почти всегда заканчивается закрывающим тегом.
+func trimSeparators(s string) string {
+	return strings.TrimSpace(strings.Trim(strings.TrimSpace(s), "·"))
+}
+
+// photo — фото объявления: id из Images и ссылки из ImageUrls, сведённые в одну
+// сущность. Порознь их держать нельзя — именно рассинхрон этих двух списков
+// ломал выбор обложки (см. cover).
+type photo struct {
+	id  int64
+	url string
+}
+
+// gallery сводит параллельные списки Авито в пары id↔ссылка.
+//
+// Списки идут бок о бок и по замыслу площадки совпадают по длине, но полагаться
+// на это нельзя: у свежезалитого кадра CDN может ещё не отдать крупный размер,
+// и такой элемент из галереи выпадает. Поэтому идём по индексу и берём id
+// только там, где он реально есть.
+func gallery(it avitoItem) []photo {
+	out := make([]photo, 0, len(it.ImageUrls))
+	for i, sizes := range it.ImageUrls {
+		url := sizes[photoSize]
+		if url == "" {
+			continue
+		}
+		p := photo{url: url}
+		if i < len(it.Images) {
+			p.id = it.Images[i]
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // photos — ссылки на полноразмерные фото в порядке объявления.
@@ -87,30 +166,31 @@ func aboutText(it avitoItem) string {
 // вообще не ходит в сеть. Скачивание — отдельный шаг с отдельным решением, и
 // принимать его должен владелец, а не разбор сохранённого файла.
 func photos(it avitoItem) []string {
-	out := make([]string, 0, len(it.ImageUrls))
-	for _, sizes := range it.ImageUrls {
-		if u := sizes[photoSize]; u != "" {
-			out = append(out, u)
-		}
+	g := gallery(it)
+	out := make([]string, 0, len(g))
+	for _, p := range g {
+		out = append(out, p.url)
 	}
 	return out
 }
 
-// cover — обложка объявления. Авито отмечает её id в listingImage, а сами
-// ImageUrls id не несут — сопоставляем по позиции в параллельном списке Images.
-// Если списки разошлись (или обложка не отмечена), берём первое фото: пустая
-// обложка в каталоге заметнее, чем не та.
+// cover — обложка объявления, отмеченная у Авито в listingImage.
+//
+// Ищем по id, а не по позиции: позиция берётся из полного списка Images, а
+// галерея может быть короче (см. gallery), и тогда индекс уезжает на соседний
+// кадр — обложкой станет не то фото, что видно в выдаче Авито. Если id не
+// нашёлся, берём первое фото: пустая обложка в каталоге заметнее, чем не та.
 func cover(it avitoItem) string {
-	all := photos(it)
-	if len(all) == 0 {
+	g := gallery(it)
+	if len(g) == 0 {
 		return ""
 	}
-	for i, id := range it.Images {
-		if id == it.ListingImage && i < len(all) {
-			return all[i]
+	for _, p := range g {
+		if p.id == it.ListingImage {
+			return p.url
 		}
 	}
-	return all[0]
+	return g[0].url
 }
 
 // extras — платные допы из прайс-листа объявления («Фурако — 5 000 ₽»,
@@ -139,10 +219,12 @@ func extras(pl *priceList) []extract.Extra {
 // reviewsCount — число отзывов из публичной строки; при неудаче — внутренний
 // счётчик площадки, чтобы поле не осталось нулевым при явно живом рейтинге.
 func reviewsCount(r *rating) int {
-	digits := reviewsCountRe.FindString(r.Summary)
-	digits = strings.NewReplacer(" ", "", " ", "").Replace(digits)
-	if n, err := strconv.Atoi(digits); err == nil && n > 0 {
-		return n
+	m := reviewsCountRe.FindStringSubmatch(r.Summary)
+	if len(m) == 2 {
+		digits := strings.NewReplacer(" ", "", " ", "").Replace(m[1])
+		if n, err := strconv.Atoi(digits); err == nil && n > 0 {
+			return n
+		}
 	}
 	return r.ActiveReviewsCount
 }

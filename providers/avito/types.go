@@ -54,13 +54,16 @@ type avitoItem struct {
 
 	PriceList *priceList `json:"priceList"`
 
-	// Phone приходит всегда, но публичного номера в нём нет: publicPhone и
-	// realPhone — null, есть только маска «8 909 XXX-XX-XX». Это не ограничение
-	// разбора: сам Авито показывает номер картинкой и не даёт скопировать его
-	// даже вручную. Контакт в каталоге заполняется после переписки с владельцем.
-	Phone *phoneBlock `json:"phone"`
-
-	Seo seoBlock `json:"seo"`
+	// Телефона здесь намеренно нет. У Авито поле phone приходит всегда, но
+	// публичного номера в нём не бывает: publicPhone и realPhone — null, есть
+	// только маска «8 909 XXX-XX-XX». Сам номер площадка показывает картинкой и
+	// не даёт скопировать даже вручную. Contact в каталоге заполняется после
+	// переписки с владельцем.
+	//
+	// Блока seo тоже нет, и это не оплошность: внутри seo.imageData лежит
+	// запакованная карточка для соцсетей, а в ней — имя продавца. Разбирать это
+	// поле значит тащить персональные данные в объекты и фикстуры публичного
+	// репозитория. SEO-тексты каталог собирает сам (extract.BuildSEO).
 }
 
 type geoBlock struct {
@@ -76,14 +79,6 @@ type locationBlock struct {
 type coords struct {
 	Lat float64 `json:"lat"`
 	Lng float64 `json:"lng"`
-}
-
-type phoneBlock struct {
-	Mask string `json:"mask"`
-}
-
-type seoBlock struct {
-	CanonicalURL string `json:"canonicalUrl"`
 }
 
 // priceList — «Прайс-лист» объявления: у одного объекта одна позиция («Купель —

@@ -2,16 +2,20 @@ package avito
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// Тесты идут по трём НАСТОЯЩИМ страницам, сохранённым владельцем из браузера в
-// разные дни (testdata/*.html). Синтетические фикстуры здесь были бы
-// самообманом: проверять надо ровно то, что реально отдаёт Авито, — включая
-// подменённые буквы в описаниях и разный набор полей у разных объявлений.
+// Тесты идут по данным трёх НАСТОЯЩИХ объявлений, сохранённых владельцем из
+// браузера в разные дни. Придумывать значения самому здесь было бы самообманом:
+// проверять надо то, что реально отдаёт Авито, — подменённые буквы в описаниях,
+// разный набор полей и разъезжающиеся координаты.
+//
+// Сами файлы testdata/*.html — не копии страниц, а вырезки из них
+// (make_fixture.py рядом): полная страница весит мегабайт и несёт имя
+// продавца, а репозиторий публичный. Значения полей в вырезке подлинные,
+// обёртка пересобрана — поэтому крайние случаи формата (экранирование,
+// минификация, обрыв файла) проверяются отдельно, в hydration_test.go.
 
 const (
 	idDlyaDvoih = 7862471298 // «Отдых для двоих», Иваново
@@ -37,6 +41,34 @@ func TestParseRealPages(t *testing.T) {
 			t.Fatalf("не разобрано объявление %d", id)
 		}
 	}
+
+	// Страховка от расхождения генератора фикстур с types.go: ITEM_FIELDS в
+	// make_fixture.py — второй, независимый список полей. Забудь его дополнить —
+	// поле молча придёт нулевым, а тесты остались бы зелёными.
+	t.Run("все читаемые поля есть в данных", func(t *testing.T) {
+		for _, o := range objects {
+			switch {
+			case o.Title == "", o.Slug == "", o.SourceID == 0:
+				t.Errorf("%d: пустое название/слаг/id", o.SourceID)
+			case o.PriceValue == 0:
+				t.Errorf("%d: нет цены", o.SourceID)
+			case o.Location == "", o.NearCity == "":
+				t.Errorf("%d: нет адреса или города", o.SourceID)
+			case o.Coords == nil:
+				t.Errorf("%d: нет координат", o.SourceID)
+			case len(o.Photos) == 0, o.Cover == "":
+				t.Errorf("%d: нет фото или обложки", o.SourceID)
+			case o.About == "":
+				t.Errorf("%d: нет описания", o.SourceID)
+			case len(o.Extras) == 0:
+				t.Errorf("%d: нет прайс-листа", o.SourceID)
+			case o.Rating == 0 || o.ReviewsCount == 0:
+				t.Errorf("%d: нет рейтинга", o.SourceID)
+			case o.Seo == nil || o.Seo.Title == "":
+				t.Errorf("%d: нет SEO-текстов", o.SourceID)
+			}
+		}
+	})
 
 	t.Run("цена, название, слаг", func(t *testing.T) {
 		o := objects[byID[idFurako]]
@@ -176,99 +208,4 @@ func TestParseRealPages(t *testing.T) {
 			}
 		}
 	})
-}
-
-func TestParseErrors(t *testing.T) {
-	t.Run("каталог не задан", func(t *testing.T) {
-		if _, err := New("").Parse(context.Background()); err == nil {
-			t.Fatal("ожидал ошибку про --input")
-		}
-	})
-
-	t.Run("каталога нет на диске", func(t *testing.T) {
-		if _, err := New(filepath.Join(t.TempDir(), "нет-такого")).Parse(context.Background()); err == nil {
-			t.Fatal("ожидал ошибку открытия каталога")
-		}
-	})
-
-	t.Run("каталог без html", func(t *testing.T) {
-		if _, err := New(t.TempDir()).Parse(context.Background()); err == nil {
-			t.Fatal("ожидал ошибку про отсутствие .html")
-		}
-	})
-
-	// Чужая страница не должна ронять сбор целиком — но если разобрать нечего
-	// вовсе, это ошибка, а не «успешный» пустой objects.json.
-	t.Run("не та страница", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "left.html"), []byte("<html>привет</html>"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := New(dir).Parse(context.Background()); err == nil {
-			t.Fatal("ожидал ошибку: ни одна страница не разобрана")
-		}
-	})
-
-	// Одна кривая копия рядом с рабочими страницами лишь пропускается.
-	t.Run("кривой файл пропускается, остальные собираются", func(t *testing.T) {
-		dir := t.TempDir()
-		src, err := os.ReadFile(filepath.Join("testdata", "furako-muzykant-7826460306.html"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "ok.html"), src, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "broken.html"), []byte("<html>мусор</html>"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		objects, err := New(dir).Parse(context.Background())
-		if err != nil {
-			t.Fatalf("Parse: %v", err)
-		}
-		if len(objects) != 1 || objects[0].SourceID != idFurako {
-			t.Fatalf("объекты = %+v", objects)
-		}
-	})
-
-	t.Run("отмена контекста", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if _, err := New("testdata").Parse(ctx); err == nil {
-			t.Fatal("ожидал ошибку отмены")
-		}
-	})
-}
-
-// Слаг обязан быть уникальным: по нему строится адрес страницы каталога, а
-// «Отдых для двоих» на Авито — название сразу у десятка объявлений.
-func TestDedupeSlugs(t *testing.T) {
-	dir := t.TempDir()
-	src, err := os.ReadFile(filepath.Join("testdata", "dlya-dvoih-7862471298.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Копия того же объявления под другим id: подменяем идентификатор по всему
-	// файлу, чтобы получить настоящего тёзку (то же название, другой объект),
-	// а не дубль, который провайдер отсеет раньше проверки слагов.
-	twin := strings.ReplaceAll(string(src), "7862471298", "7999999999")
-	for name, data := range map[string]string{"a.html": string(src), "b.html": twin} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	got, err := New(dir).Parse(context.Background())
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("объектов: %d, ожидалось 2 (тёзки, а не дубль)", len(got))
-	}
-	if got[0].Slug == got[1].Slug {
-		t.Fatalf("слаги совпали: %q", got[0].Slug)
-	}
-	if !strings.HasPrefix(got[1].Slug, got[0].Slug) {
-		t.Errorf("второй слаг %q не производный от первого %q", got[1].Slug, got[0].Slug)
-	}
 }

@@ -22,12 +22,18 @@ import (
 	"strings"
 
 	"vk-parser/internal/contract"
+	"vk-parser/providers"
 )
 
 // Provider читает сохранённые страницы из каталога dir.
 type Provider struct {
 	dir string
 }
+
+// Интерфейс в Go реализуется неявно, поэтому расхождение сигнатуры всплыло бы
+// только в app/providers_run.go — далеко от места правки. Ассерт ловит это
+// здесь же, при сборке пакета.
+var _ providers.Provider = (*Provider)(nil)
 
 // New собирает провайдера над каталогом с сохранёнными страницами.
 func New(dir string) *Provider { return &Provider{dir: dir} }
@@ -80,8 +86,19 @@ func (p *Provider) Parse(ctx context.Context) ([]contract.Object, error) {
 	if len(objects) == 0 {
 		return nil, fmt.Errorf("avito: ни одна из %d страниц не разобрана", len(files))
 	}
-	dedupeSlugs(objects)
-	return objects, nil
+	return providers.DedupeSlugs(fallbackSlugs(objects)), nil
+}
+
+// fallbackSlugs подставляет запасной слаг там, где из названия его собрать не
+// вышло: заголовок из одних эмодзи или иероглифов даёт пустую строку, а объект
+// без слага выпадает из каталога целиком (по слагу строится его адрес).
+func fallbackSlugs(objects []contract.Object) []contract.Object {
+	for i := range objects {
+		if objects[i].Slug == "" {
+			objects[i].Slug = fmt.Sprintf("avito-%d", objects[i].SourceID)
+		}
+	}
+	return objects
 }
 
 // parseFile читает файл и превращает его в карточку.
@@ -116,23 +133,4 @@ func htmlFiles(dir string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
-}
-
-// dedupeSlugs разводит тёзок: у Авито «Отдых для двоих» — название на десяток
-// объявлений сразу, а слаг обязан быть уникальным (по нему строится адрес
-// страницы). Первому по порядку слаг остаётся как есть, следующим дописывается
-// id источника — тот самый случай, ради которого SourceID и живёт в контракте.
-func dedupeSlugs(objects []contract.Object) {
-	taken := make(map[string]bool, len(objects))
-	for i := range objects {
-		s := objects[i].Slug
-		if s == "" {
-			s = fmt.Sprintf("avito-%d", objects[i].SourceID)
-		}
-		if taken[s] {
-			s = fmt.Sprintf("%s-%d", s, objects[i].SourceID)
-		}
-		taken[s] = true
-		objects[i].Slug = s
-	}
 }
